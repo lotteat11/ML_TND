@@ -1,314 +1,249 @@
-# %%
+"""
+GRACE × TEC Matching Pipeline
+==============================
+Loads GRACE density data and CODE TEC maps, then spatially matches each
+GRACE observation to its nearest TEC grid point using a K-D tree.
+
+Output
+------
+grace_data_merged_v3.parquet  — GRACE DataFrame with matched TEC columns appended.
+"""
 
 import os
-# Setting the environment variable to only expose device '1' 
-# (which TensorFlow will then call '/GPU:0' internally)
-#os.environ["CUDA_VISIBLE_DEVICES"] = "1" 
-import pandas as pd
+from datetime import timedelta
+
 import numpy as np
-from scipy.spatial import cKDTree
-import polars as pl
-from datetime import timedelta
-import tensorflow as tf
-import os
-#os.environ["TF_NUM_INTRAOP_THREADS"] = "8"
-#os.environ["TF_NUM_INTEROP_THREADS"] = "2"
-
-
-
-import polars as pl
-from datetime import timedelta
-
-# %%
-from typing import List
-from tensorflow.keras.models import load_model
-import joblib
-import xgboost as xgb
-from sklearn.metrics import mean_squared_error
-
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
-import numpy as npsour  
-from sklearn.preprocessing import MinMaxScaler
-
-from sklearn.preprocessing import MinMaxScaler
+import polars as pl
 import matplotlib.pyplot as plt
-import Feature_functions as ff
-
-import importlib
-importlib.reload(ff)
-# %%
-import tensorflow as tf, os, platform
-
-
-filename="grace_dns_with_tnd_y200916_v4_0809.parquet"
-df = pd.read_parquet(filename, engine="pyarrow")
-df['time'] = pd.to_datetime(df['time'])
-df = df[df['time'] < '2016-01-01']
-#df = df[df['time'] > '2009-06-06']
-
-df = df.copy()
-df['time'] = pd.to_datetime(df['time'])
-df = df.sort_values('time')
-
-# Take the last 3 days available in the data
-end_time = df['time'].max()
-start_time = end_time - pd.Timedelta(days=1)
-mask = (df['time'] >= start_time) & (df['time'] <= end_time)
-df_3d = df.loc[mask]
-
-
-# %%
-plt.figure(figsize=(12, 6))
-plt.plot(df_3d['time'], df_3d['msis_rho'], label='MSIS Density', color='orange', alpha=0.7)
-plt.plot(df_3d['time'], df_3d['rho_obs'], label='Observed Density', color='blue', alpha=0.7)
-plt.xlabel('Time')
-plt.ylabel('Density (kg/m³)')
-plt.title('MSIS vs Observed Atmospheric Density — Last 3 Days')
-plt.legend()
-plt.grid(True)
-plt.tight_layout()
-plt.show()
-df['time'] = pd.to_datetime(df['time'])
-df = df.sort_values('time')
-
-
-PARQUET_FILENAME = "tec_codg_2009-2017_doy1-365.parquet"  # update extension
-
-# Preferred engine is pyarrow; fallback to fastparquet if needed
-try:
-    df_tec = pd.read_parquet(PARQUET_FILENAME, engine="pyarrow")
-except Exception:
-    df_tec = pd.read_parquet(PARQUET_FILENAME, engine="fastparquet")
-
-# Assuming df and df_tec are Pandas DataFrames loaded earlier
-
-# --- Initial Conversion to Polars ---
-grace_df_pl = pl.from_pandas(df)
-df_tec_pl = pl.from_pandas(df_tec)
-
-# --- 1) GRACE: Standardize, Localize, and Rename ---
-grace_df_pl = (
-    grace_df_pl
-      .with_columns(
-          # Chain cast and time zone replacement on the original 'time' column
-          pl.col("time")
-            # 1. Cast to the required microsecond resolution
-            .dt.cast_time_unit("us")
-            # 2. Assign the UTC timezone (Polars standard method)
-            .dt.replace_time_zone("UTC")
-            .alias("grace_time"),
-          # sequential index
-          pl.arange(0, pl.len()).alias("original_index"),
-      )
-      .drop("time") # Drop the original column
-      .sort("grace_time")
-)
-
-# --- 2) TEC: Standardize and Localize ---
-df_tec_pl = (
-    df_tec_pl
-      .with_columns(
-          # Chain cast and time zone replacement on the original 'epoch' column
-          pl.col("epoch")
-            .dt.cast_time_unit("us") # Ensure microsecond to match GRACE
-            .dt.replace_time_zone("UTC")
-            .alias("epoch_tec")
-      )
-      .drop("epoch") # Drop the original column
-      .sort("epoch_tec")
-)
-
-# --- 3) Join Asof ---
-tec_epochs_only = df_tec_pl.select("epoch_tec").unique().sort("epoch_tec")
-
-temp_merged_time = grace_df_pl.join_asof(
-    other=tec_epochs_only,
-    left_on="grace_time",
-    right_on="epoch_tec",
-    strategy="nearest",
-    tolerance=timedelta(hours=3),
-)
-
-# %%
-
-
-# %%¨# %%
-temp_merged_pl=temp_merged_time
-print(temp_merged_pl.columns)
-
-
-
-
-
-# %%
-import polars as pl
-import numpy as np
 from scipy.spatial import cKDTree
-from datetime import timedelta
 
-# --- ASSUMED EXTERNAL DEFINITIONS ---
+import Feature_functions as ff  # noqa: F401  (kept for side-effects / downstream use)
 
-# 1. Coordinate Conversion Function (The haversine_tree must be defined)
-def haversine_tree(coords: np.ndarray) -> np.ndarray:
-    """Converts (lat, lon) in radians to 3D Cartesian coordinates (X, Y, Z)."""
-    lat, lon = coords[:, 0], coords[:, 1]
-    x = np.cos(lat) * np.cos(lon)
-    y = np.cos(lat) * np.sin(lon)
-    z = np.sin(lat)
-    return np.vstack((x, y, z)).T
+# ---------------------------------------------------------------------------
+# CONFIG
+# ---------------------------------------------------------------------------
 
-# 2. Parameters
-MAX_CHORD_DISTANCE = 4.15 # Your established quality control threshold
+GRACE_PARQUET   = "grace_dns_with_tnd_y200916_v4_0809.parquet"
+TEC_PARQUET     = "tec_codg_2009-2017_doy1-365.parquet"
+OUTPUT_PARQUET  = "grace_data_merged_v3.parquet"
 
-# 3. Clean Input DataFrames (MUST be pre-loaded: grace_df_pl and tec_df_pl)
-# The following lines are placeholders for your loaded data:
-# grace_df_pl = ... # Load your main GRACE DataFrame here
-# tec_df_pl = ...   # Load your clean, fully parsed TEC DataFrame here
+GRACE_TIME_MAX  = "2016-01-01"          # exclusive upper bound
 
-# --------------------------------------------------------------------
-#  CORE K-D TREE MATCHING LOGIC
-# --------------------------------------------------------------------
+TEC_TIME_WINDOW = timedelta(hours=3)    # ± window around each TEC epoch
+MAX_CHORD_DIST  = 4.15                  # chord-distance QC threshold
+MIN_TEC_POINTS  = 100                   # skip epoch if grid is too sparse
 
-pl_right = df_tec_pl 
+# ---------------------------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------------------------
 
-# 1. Define Unique TEC Epochs (The loop driver)
-unique_tec_epochs = pl_right.select(pl.col("epoch_tec")).unique().sort("epoch_tec").to_series().to_list()
-final_matched_results = []
-TIME_WINDOW = timedelta(hours=3) # +/- 1 hour around the 2-hour epoch
-k_grace=0
-print(f"Starting K-D Tree matching for {len(unique_tec_epochs)} epochs...")
-print(f"Total epochs to process: {len(unique_tec_epochs)}")
-for i, epoch in enumerate(unique_tec_epochs):
-    
-    # --- A. Prepare TEC Grid (Search Space) ---
-    # Filter the clean TEC data to get the full grid (approx. 2880 points) for this epoch
-    tec_grid_for_epoch = pl_right.filter(pl.col("epoch_tec") == epoch)
+def latlon_to_cartesian(coords_rad: np.ndarray) -> np.ndarray:
+    """Convert (lat, lon) in radians to unit-sphere Cartesian (X, Y, Z)."""
+    lat, lon = coords_rad[:, 0], coords_rad[:, 1]
+    return np.vstack([
+        np.cos(lat) * np.cos(lon),
+        np.cos(lat) * np.sin(lon),
+        np.sin(lat),
+    ]).T
 
-    # Convert to NumPy for K-D Tree: [latitude, longitude, tec_value]
-    tec_grid_np = tec_grid_for_epoch.select(["latitude", "longitude", "tec_value"]).to_numpy()
-    
-    # CRITICAL CHECK: Ensure we have the full grid
-    if tec_grid_np.shape[0] < 100: 
-        print(f"Warning: Skipping epoch {epochp} due to missing TEC grid points ({tec_grid_np.shape[0]} found).")
-        continue
 
-    # TEC Coordinates in Radians
-    tec_coords_rad = np.radians(tec_grid_np[:, :2]) 
-    
-    # --- B. Prepare GRACE Targets (Query Points) ---
-    # Filter GRACE points that temporally match this epoch's window
-    grace_targets_pl = grace_df_pl.filter(
-        (pl.col("grace_time") >= epoch - TIME_WINDOW) &
-        (pl.col("grace_time") < epoch + TIME_WINDOW)
-    ).select(["original_index", "lat", "lon"])
+# ---------------------------------------------------------------------------
+# LOAD & PREPROCESS
+# ---------------------------------------------------------------------------
 
-    if grace_targets_pl.height == 0:
-      #  print(epoch)
-     #   print("no grace")
-        k_grace=k_grace+1
-        continue # No GRACE points in this time window
-        
-    # GRACE Coordinates in Radians
-    grace_coords_np = grace_targets_pl.select(["lat", "lon"]).to_numpy()
-    grace_coords_rad = np.radians(grace_coords_np)
-    
-    # --- C. K-D Tree Operations (Core Spatial Search) ---
-    # 1. Build the K-D Tree
-    tec_tree = cKDTree(haversine_tree(tec_coords_rad))
-    # 2. Convert the GRACE query points
-    grace_cartesian = haversine_tree(grace_coords_rad)
-    
-    # 3. Query Nearest Neighbor with threshold
-    distances, indices = tec_tree.query(
-        grace_cartesian, 
-        k=1, 
-        distance_upper_bound=MAX_CHORD_DISTANCE
+def load_grace(path: str) -> tuple[pd.DataFrame, pl.DataFrame]:
+    """Load GRACE parquet, filter to before GRACE_TIME_MAX, return both pandas and polars."""
+    df = pd.read_parquet(path, engine="pyarrow")
+    df["time"] = pd.to_datetime(df["time"])
+    df = df[df["time"] < GRACE_TIME_MAX].sort_values("time").copy()
+    return df
+
+
+def load_tec(path: str) -> pd.DataFrame:
+    try:
+        return pd.read_parquet(path, engine="pyarrow")
+    except Exception:
+        return pd.read_parquet(path, engine="fastparquet")
+
+
+def to_polars_grace(df: pd.DataFrame) -> pl.DataFrame:
+    return (
+        pl.from_pandas(df)
+        .with_columns([
+            pl.col("time")
+              .dt.cast_time_unit("us")
+              .dt.replace_time_zone("UTC")
+              .alias("grace_time"),
+            pl.arange(0, pl.len()).alias("original_index"),
+        ])
+        .drop("time")
+        .sort("grace_time")
     )
-    
-    # --- D. Consolidate and Handle NaNs ---
-    # cKDTree.n is the size of the search space (tec_tree.n == tec_grid_np.shape[0])
-    i# --- D. Consolidate and Handle NaNs (Refined and Corrected) ---
-    # cKDTree.n is the size of the search space (tec_tree.n == tec_grid_np.shape[0])
-    invalid_mask = (indices == tec_tree.n) 
-    valid_mask = ~invalid_mask  # New: Explicitly define the valid mask
-    num_grace_points = grace_targets_pl.height
-    
-    # Initialize result array with NaNs: [lat, lon, vtec_value]
-    matched_tec_data_np = np.full((num_grace_points, 3), np.nan) 
-    
-    # --- D1. Assign Valid Matches (Vectorized) ---
-    
-    valid_indices = indices[valid_mask] # Indices into tec_grid_np
-    
-    # Look up the TEC data using the valid indices from the query result
-    # Columns: [latitude, longitude, tec_value]
-    matched_data_raw = tec_grid_np[valid_indices] 
-    
-    # Assign data back into the result array for *valid* matches
-    matched_tec_data_np[valid_mask, 0] = matched_data_raw[:, 0] # matched_tec_latitude
-    matched_tec_data_np[valid_mask, 1] = matched_data_raw[:, 1] # matched_tec_longitude
-    matched_tec_data_np[valid_mask, 2] = matched_data_raw[:, 2] # matched_tec_value
-
-    # Initialize quality flag
-    quality_flag = np.zeros(num_grace_points, dtype=np.int8)
-    
-    # --- D2. Apply Fallback Logic (Iterative over the GRACE points) ---
-    # Fills invalid (NaN) TEC values with the last valid TEC value found.
-    last_valid_tec_value = np.nan 
-    
-    for idx in range(num_grace_points):
-        if invalid_mask[idx]:
-            # If distance > MAX_CHORD_DISTANCE, assign fallback value
-            matched_tec_data_np[idx, 2] = last_valid_tec_value  
-            quality_flag[idx] = 1 # Mark that a fallback was used
-        else:
-            # Update the last_valid_tec_value with the current valid match
-            last_valid_tec_value = matched_tec_data_np[idx, 2]
-
-    # Create final Polars DataFrame for this epoch
-    matched_tec_data_pl = pl.DataFrame({
-        "original_index": grace_targets_pl["original_index"].to_list(),
-        "matched_tec_value": matched_tec_data_np[:, 2],
-        "matched_tec_latitude": matched_tec_data_np[:, 0],
-        "matched_tec_longitude": matched_tec_data_np[:, 1],
-        "chord_distance": distances,
-        "fallback_used": quality_flag
-    })
-    
-    final_matched_results.append(matched_tec_data_pl)
-    
-    if i % 500 == 0 and i > 0:
-        print(f"Progress: {i}/{len(unique_tec_epochs)} epochs matched.")
-# --------------------------------------------------------------------
-# 2. FINAL CONSOLIDATION
-# --------------------------------------------------------------------
-
-print("Consolidating final results...")
-final_matched_pl = pl.concat(final_matched_results)
 
 
-final_matched_pl = final_matched_pl.sort(["original_index", "chord_distance"])
+def to_polars_tec(df: pd.DataFrame) -> pl.DataFrame:
+    return (
+        pl.from_pandas(df)
+        .with_columns([
+            pl.col("epoch")
+              .dt.cast_time_unit("us")
+              .dt.replace_time_zone("UTC")
+              .alias("epoch_tec"),
+        ])
+        .drop("epoch")
+        .sort("epoch_tec")
+    )
 
-final_matched_pl = final_matched_pl.unique(subset=["original_index"], keep="first")
 
-# Join the matched results back to the original GRACE data
-grace_df_final_pl = grace_df_pl.join(
-    final_matched_pl,
-    on="original_index",
-    how="left"
-)
+# ---------------------------------------------------------------------------
+# PLOTTING
+# ---------------------------------------------------------------------------
 
-# You can now proceed to drop NaNs on grace_df_final_pl
-print(f"Final Data Shape: {grace_df_final_pl.shape}")
-print(f"INput grace Data Shape: {df.shape}")
-print(f"INput grace Data Shape: {df_tec.shape}")
-print("Matching complete. Final DataFrame includes all GRACE points, with NaNs for rejected TEC matches.")
-# %%
-print(grace_df_final_pl)
-print(k_grace)
-# %%
-grace_df_final_pl.write_parquet("grace_data_merged_v3.parquet")
+def plot_density_sample(df: pd.DataFrame, days: int = 1) -> None:
+    """Quick sanity plot: MSIS vs observed density over the last `days` days."""
+    end   = df["time"].max()
+    start = end - pd.Timedelta(days=days)
+    sub   = df.loc[(df["time"] >= start) & (df["time"] <= end)]
 
-# %%
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(sub["time"], sub["msis_rho"],  label="MSIS Density",     color="orange", alpha=0.7)
+    ax.plot(sub["time"], sub["rho_obs"],   label="Observed Density",  color="blue",   alpha=0.7)
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Density (kg/m³)")
+    ax.set_title(f"MSIS vs Observed Atmospheric Density — Last {days} Day(s)")
+    ax.legend()
+    ax.grid(True)
+    fig.tight_layout()
+    plt.show()
+
+
+# ---------------------------------------------------------------------------
+# K-D TREE MATCHING
+# ---------------------------------------------------------------------------
+
+def match_tec_to_grace(
+    grace_pl: pl.DataFrame,
+    tec_pl:   pl.DataFrame,
+) -> pl.DataFrame:
+    """
+    For every TEC epoch, spatially match each nearby GRACE point to its
+    nearest TEC grid cell. Falls back to the last valid TEC value when no
+    neighbour is found within MAX_CHORD_DIST.
+
+    Returns a Polars DataFrame with columns:
+        original_index, matched_tec_value, matched_tec_latitude,
+        matched_tec_longitude, chord_distance, fallback_used
+    """
+    unique_epochs = (
+        tec_pl.select("epoch_tec").unique().sort("epoch_tec")
+        .to_series().to_list()
+    )
+    print(f"Starting K-D Tree matching for {len(unique_epochs)} epochs...")
+
+    results        = []
+    n_empty_grace  = 0
+
+    for i, epoch in enumerate(unique_epochs):
+
+        # --- A. TEC grid for this epoch ---
+        tec_grid = tec_pl.filter(pl.col("epoch_tec") == epoch)
+        tec_np   = tec_grid.select(["latitude", "longitude", "tec_value"]).to_numpy()
+
+        if tec_np.shape[0] < MIN_TEC_POINTS:
+            print(f"  Skipping epoch {epoch}: only {tec_np.shape[0]} TEC points.")
+            continue
+
+        # --- B. GRACE targets in this time window ---
+        grace_targets = grace_pl.filter(
+            (pl.col("grace_time") >= epoch - TEC_TIME_WINDOW) &
+            (pl.col("grace_time") <  epoch + TEC_TIME_WINDOW)
+        ).select(["original_index", "lat", "lon"])
+
+        if grace_targets.height == 0:
+            n_empty_grace += 1
+            continue
+
+        # --- C. K-D Tree spatial query ---
+        tec_cart   = latlon_to_cartesian(np.radians(tec_np[:, :2]))
+        grace_cart = latlon_to_cartesian(np.radians(grace_targets.select(["lat", "lon"]).to_numpy()))
+
+        tree = cKDTree(tec_cart)
+        distances, indices = tree.query(grace_cart, k=1, distance_upper_bound=MAX_CHORD_DIST)
+
+        # --- D. Assign matches; fallback for out-of-range points ---
+        n              = grace_targets.height
+        matched        = np.full((n, 3), np.nan)   # [lat, lon, tec]
+        quality_flag   = np.zeros(n, dtype=np.int8)
+        invalid_mask   = (indices == tree.n)
+        valid_mask     = ~invalid_mask
+
+        matched[valid_mask] = tec_np[indices[valid_mask]]
+
+        # Forward-fill last valid TEC value for invalid points
+        last_valid = np.nan
+        for idx in range(n):
+            if invalid_mask[idx]:
+                matched[idx, 2] = last_valid
+                quality_flag[idx] = 1
+            else:
+                last_valid = matched[idx, 2]
+
+        results.append(pl.DataFrame({
+            "original_index":       grace_targets["original_index"].to_list(),
+            "matched_tec_value":    matched[:, 2],
+            "matched_tec_latitude": matched[:, 0],
+            "matched_tec_longitude":matched[:, 1],
+            "chord_distance":       distances,
+            "fallback_used":        quality_flag,
+        }))
+
+        if i % 500 == 0 and i > 0:
+            print(f"  Progress: {i}/{len(unique_epochs)} epochs processed.")
+
+    print(f"  Epochs with no GRACE coverage: {n_empty_grace}")
+
+    if not results:
+        raise RuntimeError("No epochs matched. Check data alignment / filters.")
+
+    # Keep best match per GRACE point (smallest chord distance)
+    return (
+        pl.concat(results)
+        .sort(["original_index", "chord_distance"])
+        .unique(subset=["original_index"], keep="first")
+    )
+
+
+# ---------------------------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    # 1. Load
+    print("Loading GRACE data...")
+    grace_pd = load_grace(GRACE_PARQUET)
+
+    print("Loading TEC data...")
+    tec_pd = load_tec(TEC_PARQUET)
+
+    # 2. Sanity plot
+    plot_density_sample(grace_pd, days=1)
+
+    # 3. Convert to Polars
+    grace_pl = to_polars_grace(grace_pd)
+    tec_pl   = to_polars_tec(tec_pd)
+
+    # 4. Match
+    matched_pl = match_tec_to_grace(grace_pl, tec_pl)
+
+    # 5. Join back onto GRACE
+    grace_final_pl = grace_pl.join(matched_pl, on="original_index", how="left")
+
+    print(f"\nGRACE input rows : {len(grace_pd):,}")
+    print(f"TEC   input rows : {len(tec_pd):,}")
+    print(f"Output rows      : {grace_final_pl.shape[0]:,}")
+    print("NaNs for unmatched TEC points are preserved in matched_tec_value.")
+
+    # 6. Save
+    grace_final_pl.write_parquet(OUTPUT_PARQUET)
+    print(f"Saved → {OUTPUT_PARQUET}")
