@@ -15,67 +15,50 @@ import os
 #os.environ["TF_NUM_INTEROP_THREADS"] = "2"
 
 
+
+import polars as pl
+from datetime import timedelta
+
 # %%
 from typing import List
 from tensorflow.keras.models import load_model
 import joblib
 import xgboost as xgb
 from sklearn.metrics import mean_squared_error
-import numpy as np
-import pandas as pd
+
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
 import numpy as npsour  
 from sklearn.preprocessing import MinMaxScaler
-import pandas as pd
+
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 import Feature_functions as ff
-import numpy as np
+
 import importlib
 importlib.reload(ff)
 # %%
 import tensorflow as tf, os, platform
-print("tf:", tf.__version__, "| python:", platform.python_version())
-#print("CPUs:", tf.config.threading.get_intra_op_parallelism_threads())
-print("GPUs:", tf.config.list_physical_devices('GPU'))
 
 
-
-# This should now only show one GPU device (index 0).
-
-# %%
-#df = pd.read_parquet("grace_dns_with_tnd_y200910_v1_2408.parquet", engine="pyarrow")
-#df = pd.read_parquet("grace_dns_with_tnd_y200912_v1_2608.parquet", engine="pyarrow")
-df = pd.read_parquet("grace_dns_with_tnd_y200916_v4_0809.parquet", engine="pyarrow")
-#df = df.drop_duplicates(subset=["time", "lat", "lon"])
+filename="grace_dns_with_tnd_y200916_v4_0809.parquet"
+df = pd.read_parquet(filename, engine="pyarrow")
 df['time'] = pd.to_datetime(df['time'])
 df = df[df['time'] < '2016-01-01']
-df = df[df['time'] > '2009-06-06']
-#df = df[df['time'] < '2016-01-01']
-# %%
-#df = df[df['time'] < '2010-01-01']
-print(df.head(100))
-print(df.tail(100))
-import pandas as pd
-import matplotlib.pyplot as plt
+#df = df[df['time'] > '2009-06-06']
 
-# Ensure time column is datetime (and sorted)
 df = df.copy()
 df['time'] = pd.to_datetime(df['time'])
 df = df.sort_values('time')
-# %%
+
 # Take the last 3 days available in the data
 end_time = df['time'].max()
 start_time = end_time - pd.Timedelta(days=1)
 mask = (df['time'] >= start_time) & (df['time'] <= end_time)
-print(start_time)
-print(end_time)
-# %%
 df_3d = df.loc[mask]
-print(df_3d.head(100))
-print(df_3d.tail(100))
+
+
 # %%
 plt.figure(figsize=(12, 6))
 plt.plot(df_3d['time'], df_3d['msis_rho'], label='MSIS Density', color='orange', alpha=0.7)
@@ -87,54 +70,9 @@ plt.legend()
 plt.grid(True)
 plt.tight_layout()
 plt.show()
-
-
-# %%
-#df = df.sort_values('time')
-
-# Compute monthly averages
-#df['month'] = df['time'].dt.to_period('M')
-#monthly_avg = df.groupby('month').agg({
- #   'rho_obs': 'mean',
-  #  'msis_rho': 'mean'
-#}).reset_index()
-
-# Convert month back to timestamp for plotting
-#monthly_avg['month'] = monthly_avg['month'].dt.to_timestamp()
-
-# Plot monthly averages
-#plt.figure(figsize=(12, 6))
-#plt.plot(monthly_avg['month'], monthly_avg['rho_obs'], label='Observed Density (Monthly Avg)', color='blue')
-#plt.plot(monthly_avg['month'], monthly_avg['msis_rho'], label='MSIS Density (Monthly Avg)', color='orange')
-#plt.xlabel('Time')
-#plt.ylabel('Density (kg/m³)')
-#plt.title('Monthly Average of MSIS vs Observed Atmospheric Density')
-#plt.legend()
-#plt.grid(True)
-#plt.tight_layout()
-#plt.show()
-
-# %%
-
-import pandas as pd
-import matplotlib.pyplot as plt
-
-# Assuming df has columns: 'time', 'rho_obs', 'msis_rho'
-# Ensure time is datetime and sort
 df['time'] = pd.to_datetime(df['time'])
 df = df.sort_values('time')
 
-
-# %%
-#CSV_FILENAME = "tec_codg_2009-2017_doy1-365.csv"
-#df_tec = pd.read_csv(
- #       CSV_FILENAME,
-  #      parse_dates=['epoch'],
-   #     index_col=False
-    #)
-#print(df_tec(100))
-
-# %%
 
 PARQUET_FILENAME = "tec_codg_2009-2017_doy1-365.parquet"  # update extension
 
@@ -144,16 +82,6 @@ try:
 except Exception:
     df_tec = pd.read_parquet(PARQUET_FILENAME, engine="fastparquet")
 
-
-
-print(df_tec.head(100))
-print(df_tec.tail(100))
-print(df_tec.dtypes)  # useful to confirm column types
-
-# %%
-
-import polars as pl
-from datetime import timedelta
 # Assuming df and df_tec are Pandas DataFrames loaded earlier
 
 # --- Initial Conversion to Polars ---
@@ -206,40 +134,9 @@ temp_merged_time = grace_df_pl.join_asof(
 # %%
 
 
-
-# %%
-
-print(temp_merged_time.columns)
-# %%
-#temp_merged_time.rename(columns={'epoch': 'epoch_tec_key'}, inplace=True) 
-
-#print(f"✅ Step 1 Complete. Time-matched rows (index preserved): {len(temp_merged_time):,}")
-#temp_merged_time.rename(columns={'epoch_tec': 'epoch'}, inplace=True)
-# temp_merged_time now contains: [GRACE data] + [epoch_tec]. It is clean.
-print(f"Step 1 Complete. Time-matched rows: {len(temp_merged_time):,}")
-print(f"Step 1 Complete. Time-matched rows: {len(df):,}")
-print(tec_epochs_only)# %%
-print(temp_merged_time.columns)# %%
-
-# %%¨
-
-print(df_tec.columns)
-# %%¨
-#pl_left  = pl.from_pandas(temp_merged_time)  # has column 'epoch_y'
-#pl_right = pl.from_pandas(df_tec)
-#pl_right = pl_right.unique(subset=["epoch"], maintain_order=True)
-#temp_merged_final_pl = pl_left.join(
- #   pl_right,
-  #  left_on="epoch_tec",
-   # right_on="epoch",
-    #how="left"
-
-
 # %%¨# %%
 temp_merged_pl=temp_merged_time
 print(temp_merged_pl.columns)
-# %%
-# %%
 
 
 
@@ -271,10 +168,9 @@ MAX_CHORD_DISTANCE = 4.15 # Your established quality control threshold
 # tec_df_pl = ...   # Load your clean, fully parsed TEC DataFrame here
 
 # --------------------------------------------------------------------
-# 🚀 CORE K-D TREE MATCHING LOGIC
+#  CORE K-D TREE MATCHING LOGIC
 # --------------------------------------------------------------------
 
-#grace_df_pl  = pl.from_pandas(temp_merged_time)  # has column 'epoch_y'
 pl_right = df_tec_pl 
 
 # 1. Define Unique TEC Epochs (The loop driver)
