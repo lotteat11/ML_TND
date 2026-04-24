@@ -1,1 +1,20 @@
 
+# Data preparation pipeline
+
+This folder contains the three-step pipeline used to construct the datasets
+for thermospheric neutral density modeling.
+
+## Step 1: Satellite density data
+`GettingData.py`
+Downloads and parses GRACE and Swarm thermospheric density products
+from the TU Delft Thermosphere FTP server.
+
+## Step 2: TEC data
+`ImportTec.py`
+Downloads and parses CODE GIM TEC (IONEX) data from NASA CDDIS.
+
+## Step 3: TEC–GRACE merging
+`MergeTecGrace.py`
+Performs temporal and spatial collocation of TEC values with GRACE
+density observations, producing the final ML-ready dataset.
+
