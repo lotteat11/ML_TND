@@ -378,7 +378,7 @@ def run_experiment(do_retrain: int,
 
     # ---- 7) Figures: save with unique filenames tagged by the run ----
     # a) Validation densities + metrics figure
-    ff.plot_val_densities_with_metrics3(
+    ff.plot_val_densities_with_metrics(
         pred_df, time_col="time", sample_step=30,
         obs_col="rho_obs", msis_col="msis_rho", pred_col="rho_pred"
     )
