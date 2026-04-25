@@ -7,10 +7,8 @@ XGBoost model that corrects NRLMSISE-2.1 density predictions using GRACE satelli
 ## Setup
 
 ```bash
-./setup.sh
+pip install -r requirements.txt
 ```
-
-This installs `libomp` on macOS (required by XGBoost) and runs `pip install -r requirements.txt`.
 
 ---
 
