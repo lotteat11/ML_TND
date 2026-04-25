@@ -32,7 +32,7 @@ ML_TND/
 ├── Forecast/
 │   ├── Ontrack.py           # Rolling warm-start forecast on out-of-sample data
 │   ├── off_track.py         # Global grid prediction + Swarm validation
-│   └── compare (5).py       # Collocate Swarm obs to model grid, compute metrics
+│   └── swarm_validation.py  # Collocate Swarm obs to model grid, compute metrics
 └── Feature_functions.py     # Feature engineering, splitting, scaling, shared plots
 ```
 
@@ -90,7 +90,7 @@ Builds a global lat/lon grid for a chosen UTC snapshot, runs MSIS, and applies a
 
 ### 9. Compare model vs Swarm
 ```bash
-cd Forecast && python "compare (5).py" --result_df result_df.csv --scaled_swarm scaled_swarm.csv --plot
+cd Forecast && python swarm_validation.py --result_df result_df.csv --scaled_swarm scaled_swarm.csv --plot
 ```
 Collocates Swarm observations (scaled to GRACE altitude) to the model grid and computes bias, RMSE, MAPE, and log-space metrics for both the prediction and MSIS baseline. Outputs a collocated CSV and diagnostic plots.
 

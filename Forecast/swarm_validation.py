@@ -2,13 +2,13 @@
 
 
 """
-compare.py
+swarm_validation.py
 - Collocates Swarm observations (scaled to GRACE altitude) to the model prediction grid.
 - Computes bias, MAE, RMSE, MAPE, R², and log-space metrics for prediction vs MSIS.
 - Runs from the command line or imported as a module; saves collocated CSV and optional plots.
 
 Usage:
-    python "compare (5).py" --result_df result_df.csv --scaled_swarm scaled_swarm.csv --plot
+    python swarm_validation.py --result_df result_df.csv --scaled_swarm scaled_swarm.csv --plot
 """
 
 from __future__ import annotations
