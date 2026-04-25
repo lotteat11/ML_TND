@@ -92,7 +92,9 @@ runs/
     └── val_densities_<tag>.png
 ```
 
-The snapshot file (`xgb_model_saved_*`) is what Step 8 loads. Set `model_file` in the `Config` at the top of `off_track.py` to point to the desired snapshot.
+During the rolling forecast, a warm-start model snapshot is saved for **one specific date** controlled by `DATE_TO_SAVE_MODEL` at the top of `ontrack.py`. That snapshot captures the model state after it has been fine-tuned on data up to that date, and is the input for Step 8. To use a different date:
+1. Set `DATE_TO_SAVE_MODEL` in `ontrack.py` and re-run Step 7.
+2. Set `model_file` in the `Config` at the top of `off_track.py` to the path of the new snapshot.
 
 ### 7b. Add MSIS density to Swarm data (needed for Step 8)
 ```bash
