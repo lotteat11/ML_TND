@@ -136,14 +136,15 @@ def plot_val_densities_with_metrics(
 
 
 def plot_training_curve(history: dict) -> None:
-    """Plot MAE training and validation curves from xgb_model.evals_result()."""
+    """Plot RMSE training and validation curves from evals_result dict."""
     train_key = list(history.keys())[0]
     val_key   = list(history.keys())[1]
+    metric    = "rmse" if "rmse" in history[train_key] else list(history[train_key].keys())[0]
     plt.figure(figsize=(8, 5))
-    plt.plot(history[train_key]["mae"], label="Train MAE")
-    plt.plot(history[val_key]["mae"],   label="Validation MAE")
+    plt.plot(history[train_key][metric], label=f"Train {metric.upper()}")
+    plt.plot(history[val_key][metric],   label=f"Validation {metric.upper()}")
     plt.xlabel("Boosting rounds")
-    plt.ylabel("MAE (log space)")
+    plt.ylabel(f"{metric.upper()} (log space)")
     plt.title("XGBoost Training vs Validation")
     plt.legend()
     plt.grid(True)

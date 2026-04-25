@@ -34,7 +34,10 @@ except Exception:
 try:
     from unlzw3 import unlzw
 except ImportError:
-    from unlzw import unlzw  # fallback if environment exposes it as 'unlzw'
+    raise ImportError(
+        "unlzw3 is required to decompress .Z IONEX files. "
+        "Install it with: pip install unlzw3"
+    )
 
 # ----------------------------
 # ======= Configuration =======

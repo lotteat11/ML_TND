@@ -42,9 +42,9 @@ if __name__ == "__main__":
         ff.timeblock_split_repeated(
             X, y,
             fractions=(2/3, 1/6, 1/6),
-            n_cycles=7,
-            gap_before_val=500,
-            gap_before_test=500,
+            n_cycles=8,
+            gap_before_val=1100,
+            gap_before_test=1100,
             order=("train", "test", "val"),
             copy=False,
         )
@@ -59,11 +59,11 @@ if __name__ == "__main__":
     y_test_s = ff.scale_y_transform(y_test, scaler_y)
 
     # 3. Load model and predict
-    model = xgb.XGBRegressor()
+    model = xgb.Booster()
     model.load_model(MODEL_OUT)
 
-    y_pred_val_s  = model.predict(X_val_s)
-    y_pred_test_s = model.predict(X_test_s)
+    y_pred_val_s  = model.predict(xgb.DMatrix(X_val_s))
+    y_pred_test_s = model.predict(xgb.DMatrix(X_test_s))
 
     rmse_val  = np.sqrt(mean_squared_error(y_val_s[TARGET],  y_pred_val_s))
     rmse_test = np.sqrt(mean_squared_error(y_test_s[TARGET], y_pred_test_s))
@@ -82,16 +82,13 @@ if __name__ == "__main__":
     df_val = df_feat.loc[idx_val].copy()
     df_val["y_true_log"] = y_val[TARGET].values.ravel()
     df_val["y_pred_log"] = np.asarray(y_pred_val).ravel()
-    df_val["rho_msis"]   = df_val["tnd_kg_m3"]
+    df_val["rho_msis"]   = df_val["tnd_kg_m3"] if "tnd_kg_m3" in df_val.columns else df_val["msis_rho"]
     df_val["rho_pred"]   = df_val["rho_msis"] * np.exp(df_val["y_pred_log"])
     if "rho_obs" in df_val.columns:
         df_val["ratio_pred"] = df_val["rho_pred"] / df_val["rho_obs"]
 
     # 6. Density time-series and parity plots
     plot_val_densities_with_metrics(df_val, sample_step=10)
-    ff.plot_val_densities_with_metrics(df_val, time_col="time", sample_step=1,
-                                       obs_col="rho_obs", msis_col="msis_rho",
-                                       pred_col="rho_pred")
 
     # 7. 2D histograms
     plot_density_hist2d(df_val, obs_col="rho_obs", pred_col="rho_pred",
@@ -101,7 +98,7 @@ if __name__ == "__main__":
 
     # 8. Error maps
     df_val["diff"]       = (df_val["rho_obs"] - df_val["rho_pred"]).abs()
-    df_val["diff_nmsis"] = (df_val["rho_obs"] - df_val["tnd_kg_m3"]).abs()
+    df_val["diff_nmsis"] = (df_val["rho_obs"] - df_val["msis_rho"]).abs()
 
     df_val_small = df_val.iloc[::100]
     for xcol, ycol in [("lat", "alt_km"), ("rho_obs", "alt_km"), ("rho_obs", "ap_m3h")]:

@@ -1,8 +1,8 @@
 """
 train.py
-- Loads GRACE data, engineers features, and splits into train/val/test using cyclic time blocks.
-- Trains an XGBoost model to predict log(rho_obs / rho_msis) as the correction target.
-- Saves the trained model and MinMax scalers to disk.
+- Loads GRACE merged data, engineers features including TEC lags and interaction terms.
+- Splits into train/val/test using cyclic time blocks and scales features.
+- Trains XGBoost (native API) to predict log(rho_obs/msis_rho); saves model and scalers.
 """
 
 import os
@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+from xgboost.callback import EarlyStopping, LearningRateScheduler
 
 import Feature_functions as ff
 
@@ -24,6 +25,16 @@ from config import (
 from plotting import (
     plot_feature_distributions, plot_split_targets, plot_training_curve,
 )
+
+
+def lr_scheduler(current_round: int) -> float:
+    initial_lr = 5e-4
+    decay_factor = 0.8
+    step_size = 15
+    lr = initial_lr * (decay_factor ** (current_round // step_size))
+    if current_round % 50 == 0:
+        print(f"Round {current_round}: LR = {lr:.8f}")
+    return lr
 
 
 def summarize(name: str, df: pd.DataFrame) -> dict:
@@ -43,9 +54,12 @@ def load_and_engineer(parquet_file: str) -> pd.DataFrame:
     df = df[(df["time"] > TIME_MIN) & (df["time"] < TIME_MAX)].sort_values("time")
 
     df = ff.add_lst_doy_features(df)
-    df["lon_sin"]   = np.sin(np.deg2rad(df["lon"]))
-    df["lon_cos"]   = np.cos(np.deg2rad(df["lon"]))
-    df["log_ratio"] = np.log(df["rho_obs"] / df["msis_rho"])
+    df["lon_sin"]           = np.sin(np.deg2rad(df["lon"]))
+    df["lon_cos"]           = np.cos(np.deg2rad(df["lon"]))
+    df["lst_lat_sin"]       = df["lst_sin"] * df["lat"]
+    df["vtec_matched_lag"]  = df["matched_tec_value"].shift(500)
+    df["vtec_matched_lag2"] = df["matched_tec_value"].shift(17280)
+    df["log_ratio"]         = np.log(df["rho_obs"] / df["msis_rho"])
     return df.dropna()
 
 
@@ -62,9 +76,9 @@ if __name__ == "__main__":
         ff.timeblock_split_repeated(
             X, y,
             fractions=(2/3, 1/6, 1/6),
-            n_cycles=7,
-            gap_before_val=500,
-            gap_before_test=500,
+            n_cycles=8,
+            gap_before_val=1100,
+            gap_before_test=1100,
             order=("train", "test", "val"),
             copy=False,
         )
@@ -87,34 +101,48 @@ if __name__ == "__main__":
     joblib.dump(scaler_X, SCALER_X_OUT)
     joblib.dump(scaler_y, SCALER_Y_OUT)
 
-    # 5. Train
-    model = xgb.XGBRegressor(
-        n_estimators=600,
-        learning_rate=0.0004,
-        max_depth=9,
-        min_child_weight=4,
-        subsample=1,
-        base_score=float(y_train_s[TARGET].mean()),
-        n_jobs=-1,
-        eval_metric=["mae"],
-    )
-    model.fit(
-        X_train_s, y_train_s[TARGET],
-        eval_set=[(X_train_s, y_train_s[TARGET]), (X_test_s, y_test_s[TARGET])],
-        verbose=50,
+    # 5. Train (native API — matches paper hyperparameters)
+    dtrain = xgb.DMatrix(X_train_s, label=y_train_s[TARGET])
+    dtest  = xgb.DMatrix(X_test_s,  label=y_test_s[TARGET])
+
+    params = {
+        "max_depth":        4,
+        "min_child_weight": 300,
+        "subsample":        0.5,
+        "colsample_bytree": 0.6,
+        "eval_metric":      ["rmse"],
+        "base_score":       float(y_train_s[TARGET].mean()),
+        "tree_method":      "hist",
+        "nthread":          -1,
+    }
+
+    evals_result = {}
+    callbacks = [
+        LearningRateScheduler(lr_scheduler),
+        EarlyStopping(rounds=30, save_best=True, data_name="val", metric_name="rmse"),
+    ]
+
+    model = xgb.train(
+        params, dtrain,
+        num_boost_round=1360,
+        evals=[(dtrain, "train"), (dtest, "val")],
+        evals_result=evals_result,
+        callbacks=callbacks,
+        verbose_eval=10,
     )
     model.save_model(MODEL_OUT)
     print(f"Model saved → {MODEL_OUT}")
 
     # 6. Training curve
-    plot_training_curve(model.evals_result())
+    plot_training_curve(evals_result)
 
     # 7. Feature importance
+    scores = model.get_score(importance_type="gain")
     feat_imp = pd.DataFrame({
-        "feature":    X_train_s.columns,
-        "importance": model.feature_importances_,
+        "feature":    list(scores.keys()),
+        "importance": list(scores.values()),
     }).sort_values("importance", ascending=False)
-    print(feat_imp.head(13))
+    print(feat_imp.head(15))
     plt.figure(figsize=(8, 6))
     xgb.plot_importance(model, importance_type="gain", max_num_features=20)
     plt.show()
