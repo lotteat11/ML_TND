@@ -19,8 +19,8 @@ ML_TND/
 ├── DataPreparation/
 │   ├── GettingData.py       # Download GRACE/Swarm DNS from TU Delft FTP
 │   ├── ImportTec.py         # Download and parse IONEX TEC files from NASA CDDIS
-│   ├── run_pymsis.py        # Run NRLMSISE-2.1 on GRACE data, add msis_rho column
-│   ├── run_pymsis_swarm.py  # Run NRLMSISE-2.1 on Swarm data, add tnd columns
+│   ├── run_pymsis.py        # Run NRLMSISE-2.1 on GRACE data, add simulated values
+│   ├── run_pymsis_swarm.py  # Run NRLMSISE-2.1 on Swarm data, add simulated values
 │   ├── pymsis_utils.py      # Helper functions for MSIS and space weather fetching
 │   └── MergeTecGrace2.py    # Match TEC to GRACE using K-D tree, save merged parquet
 ├── CoreModel/
