@@ -17,7 +17,7 @@ import pandas as pd
 import xgboost as xgb
 from sklearn.metrics import mean_squared_error
 
-import Feature_functions as ff
+import feature_functions as ff
 
 from config import (
     PARQUET_FILE, MODEL_OUT, SCALER_X_OUT, SCALER_Y_OUT,

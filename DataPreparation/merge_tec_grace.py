@@ -1,7 +1,7 @@
 # Author: Lotte Ansgaard Thomsen
 # Aalborg University
 """
-MergeTecGrace2.py
+merge_tec_grace.py
 - Reads GRACE and TEC parquet files into memory.
 - Matches each GRACE point to the nearest TEC grid cell using a K-D tree.
 - Saves the merged dataset with matched_tec_value added as grace_data_merged_v3.parquet.
@@ -18,7 +18,7 @@ import polars as pl
 import matplotlib.pyplot as plt
 from scipy.spatial import cKDTree
 
-import Feature_functions as ff  # noqa: F401  (kept for side-effects / downstream use)
+import feature_functions as ff  # noqa: F401  (kept for side-effects / downstream use)
 
 # ---------------------------------------------------------------------------
 # CONFIG

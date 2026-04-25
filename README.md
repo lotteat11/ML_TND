@@ -17,22 +17,22 @@ pip install -r requirements.txt
 ```
 ML_TND/
 ├── DataPreparation/
-│   ├── GettingData.py       # Download GRACE/Swarm DNS from TU Delft FTP
-│   ├── ImportTec.py         # Download and parse IONEX TEC files from NASA CDDIS
+│   ├── download_dns.py      # Download GRACE/Swarm DNS from TU Delft FTP
+│   ├── download_tec.py      # Download and parse IONEX TEC files from NASA CDDIS
 │   ├── run_pymsis.py        # Run NRLMSISE-2.1 on GRACE data, add simulated values
 │   ├── run_pymsis_swarm.py  # Run NRLMSISE-2.1 on Swarm data, add simulated values
 │   ├── pymsis_utils.py      # Helper functions for MSIS and space weather fetching
-│   └── MergeTecGrace2.py    # Match TEC to GRACE using K-D tree, save merged parquet
+│   └── merge_tec_grace.py   # Match TEC to GRACE using K-D tree, save merged parquet
 ├── CoreModel/
 │   ├── config.py            # Shared config: file paths, features, target
 │   ├── train.py             # Train XGBoost model, save model + scalers
 │   ├── evaluate.py          # Load saved model, run diagnostics and plots
 │   └── plotting.py          # Plotting utilities for train/eval
 ├── Forecast/
-│   ├── Ontrack.py           # Rolling warm-start forecast on out-of-sample data
+│   ├── ontrack.py            # Rolling warm-start forecast on out-of-sample data
 │   ├── off_track.py         # Global grid prediction + Swarm validation
 │   └── swarm_validation.py  # Collocate Swarm obs to model grid, compute metrics
-└── Feature_functions.py     # Feature engineering, splitting, scaling, shared plots
+└── feature_functions.py     # Feature engineering, splitting, scaling, shared plots
 ```
 
 ---
@@ -41,13 +41,13 @@ ML_TND/
 
 ### 1. Download satellite density data
 ```bash
-python DataPreparation/GettingData.py
+python DataPreparation/download_dns.py
 ```
 Downloads GRACE DNS files from TU Delft FTP. Set `MISSION = "GRACE"`, `YEARS = (2009, 2016)`, and `PARQUET_OUT` at the top of the file. Outputs `GRACE_RAW`.
 
 ### 2. Download TEC data
 ```bash
-python DataPreparation/ImportTec.py
+python DataPreparation/download_tec.py
 ```
 Downloads CODE GIM IONEX files from NASA CDDIS. Requires Earthdata credentials in `~/.netrc`. Outputs `TEC_RAW`.
 
@@ -59,7 +59,7 @@ Reads `GRACE_RAW` (Step 1), fetches F10.7 and Ap indices via pymsis, runs NRLMSI
 
 ### 4. Merge TEC with GRACE
 ```bash
-python DataPreparation/MergeTecGrace2.py
+python DataPreparation/merge_tec_grace.py
 ```
 Spatially matches TEC grid cells to GRACE points using a K-D tree (±3 hour window). Reads `GRACE_MSIS` and `TEC_RAW`. Outputs `GRACE_MERGED`.
 
@@ -77,7 +77,7 @@ Loads `MODEL`, `SCALER_X`, `SCALER_Y`, runs on val/test splits, and produces dia
 
 ### 7. Rolling forecast (out-of-sample)
 ```bash
-cd Forecast && python Ontrack.py
+cd Forecast && python ontrack.py
 ```
 Runs on data outside the training window (pre-2009 or post-2016). Fine-tunes the model on the previous 5 days at each step, then predicts 1 or 3 days ahead. Tests 8 combinations and saves results to `runs/`.
 
@@ -85,7 +85,7 @@ Runs on data outside the training window (pre-2009 or post-2016). Fine-tunes the
 ```bash
 python DataPreparation/run_pymsis_swarm.py
 ```
-Reads `SWARM_RAW` (download via `GettingData.py` with `MISSION = "Swarm"`, `YEARS = (2015, 2016)`), joins hourly space weather indices, and runs NRLMSISE-2.1 at both satellite altitude and 400 km. Saves `SWARM_MSIS`.
+Reads `SWARM_RAW` (download via `download_dns.py` with `MISSION = "Swarm"`, `YEARS = (2015, 2016)`), joins hourly space weather indices, and runs NRLMSISE-2.1 at both satellite altitude and 400 km. Saves `SWARM_MSIS`.
 
 ### 8. Global density map
 ```bash

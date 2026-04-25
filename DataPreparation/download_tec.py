@@ -1,7 +1,7 @@
 # Author: Lotte Ansgaard Thomsen
 # Aalborg University
 """
-ImportTec.py
+download_tec.py
 - Downloads IONEX TEC files from NASA CDDIS (requires Earthdata login in .netrc).
 - Parses the IONEX format into epoch/latitude/longitude/tec_value rows.
 - Saves the combined output as a parquet file.

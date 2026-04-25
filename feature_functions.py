@@ -1,7 +1,7 @@
 # Author: Lotte Ansgaard Thomsen
 # Aalborg University
 """
-Feature_functions.py
+feature_functions.py
 - Feature engineering helpers: LST/DOY trig features, TEC lag columns, lon encoding.
 - Data splitting (cyclic time-block), scaling, and inverse-transform utilities.
 - Plotting functions shared across train, evaluate, and forecast scripts.
