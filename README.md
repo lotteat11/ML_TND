@@ -31,7 +31,8 @@ ML_TND/
 │   └── plotting.py          # Plotting utilities for train/eval
 ├── Forecast/
 │   ├── Ontrack.py           # Rolling warm-start forecast on out-of-sample data
-│   └── off_track.py         # Global grid prediction + Swarm validation
+│   ├── off_track.py         # Global grid prediction + Swarm validation
+│   └── compare (5).py       # Collocate Swarm obs to model grid, compute metrics
 └── Feature_functions.py     # Feature engineering, splitting, scaling, shared plots
 ```
 
@@ -86,6 +87,12 @@ Runs on data outside the training window (pre-2009 or post-2016). Fine-tunes the
 cd Forecast && python off_track.py
 ```
 Builds a global lat/lon grid for a chosen UTC snapshot, runs MSIS, and applies a warm-start model snapshot to predict density worldwide. Optionally overlays Swarm observations.
+
+### 9. Compare model vs Swarm
+```bash
+cd Forecast && python "compare (5).py" --result_df result_df.csv --scaled_swarm scaled_swarm.csv --plot
+```
+Collocates Swarm observations (scaled to GRACE altitude) to the model grid and computes bias, RMSE, MAPE, and log-space metrics for both the prediction and MSIS baseline. Outputs a collocated CSV and diagnostic plots.
 
 ---
 
