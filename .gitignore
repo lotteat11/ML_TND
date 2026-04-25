@@ -1,0 +1,33 @@
+# Virtual environments
+ven_2404/
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Data files (large, not version-controlled)
+*.parquet
+*.nc
+*.hdf5
+*.h5
+
+# Model outputs
+*.joblib
+*.json
+*.pkl
+*.csv
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store

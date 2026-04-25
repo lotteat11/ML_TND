@@ -10,6 +10,8 @@ grace_data_merged_v3.parquet  — GRACE DataFrame with matched TEC columns appen
 """
 
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import timedelta
 
 import numpy as np

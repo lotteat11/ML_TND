@@ -9,7 +9,7 @@ from tqdm import trange # Import tqdm for a nice progress bar
 # -*- coding: utf-8 -*-
 
 """
-Robust IONEX downloader + parser for CODE GIM (and other IGS centers).
+IONEX downloader + parser for CODE GIM (and other IGS centers).
 
 Features:
 - Earthdata-authenticated HTTPS downloads from NASA CDDIS with response validation.
@@ -405,4 +405,4 @@ if __name__ == "__main__":
 
 
 # %%
-d
+

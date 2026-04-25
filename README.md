@@ -1,5 +1,17 @@
 Adaptive Thermospheric Density Modeling with TEC Coupling
 
+## Setup
+
+```bash
+pip install -r requirements.txt
+```
+
+```bash
+brew install libomp
+```
+
+
+
 This repository contains the full data processing, modeling, validation, and forecasting pipeline used in the study of adaptive thermospheric neutral density modeling using satellite observations and ionospheric Total Electron Content (TEC).
 The code supports:
 
