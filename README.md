@@ -36,16 +36,6 @@ ML_TND/
 
 ---
 
-## Run everything
-
-```bash
-./run_pipeline.sh
-```
-
-Steps 1 and 2 require credentials (FTP and NASA Earthdata). If the data files are already in place, comment those steps out in `run_pipeline.sh`.
-
----
-
 ## Pipeline — run in this order
 
 ### 1. Download satellite density data
