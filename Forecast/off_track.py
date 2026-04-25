@@ -36,8 +36,7 @@ class Config:
     tec_parquet: str = "tec_codg_2009-2017_doy1-365.parquet"
 
     # Model artefacts
-    model_file: str = "xgb_model_saved_for_start_date_2016-02-18.json"
-    model_file: str = "xgb_model_saved_dr1_post2016_h3_start_2016-02-18.json"
+    model_file: str = "runs/dr1_post2016_h3/xgb_model_saved_dr1_post2016_h3_start_2016-02-18.json"
     model_file_core: str = "xgb_model_updated.json"
     scaler_x_file: str = "scaler_xgboost_X_v3.joblib"
     scaler_y_file: str = "scaler_xgboost_y_v3.joblib"
