@@ -1,7 +1,10 @@
-
+"""
+off_track.py
+- Builds a global lat/lon grid for a chosen UTC snapshot and runs NRLMSISE-2.1 on it.
+- Loads a warm-start model snapshot and predicts thermospheric density across the grid.
+- Optionally overlays Swarm satellite observations scaled to the GRACE altitude for validation.
 """
 
-"""
 from __future__ import annotations
 
 import os

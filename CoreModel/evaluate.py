@@ -1,14 +1,8 @@
 """
-Evaluation script for the XGBoost density correction model.
-
-Loads the saved model and scalers, runs predictions on the validation
-and test sets, and produces all diagnostic plots.
-
-Run:
-    python evaluate.py
-
-Requires that train.py has already been run to produce:
-    xgb_model_test.json, scaler_xgboost_X_test.joblib, scaler_xgboost_y_test.joblib
+evaluate.py
+- Loads the saved model and scalers produced by train.py (run that first).
+- Runs predictions on the validation and test splits, back-transforms to physical density.
+- Produces residual diagnostics, parity plots, error maps, and threshold distribution plots.
 """
 
 import os

@@ -1,5 +1,8 @@
 """
-Shared configuration for the XGBoost density correction pipeline.
+config.py
+- Shared file paths for data, model, and scaler outputs.
+- Defines the feature list and target variable used in training and evaluation.
+- Imported by train.py and evaluate.py to keep settings in one place.
 """
 
 PARQUET_FILE  = "grace_data_merged_v3.parquet"

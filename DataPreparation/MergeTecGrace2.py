@@ -1,12 +1,8 @@
 """
-GRACE × TEC Matching Pipeline
-==============================
-Loads GRACE density data and CODE TEC maps, then spatially matches each
-GRACE observation to its nearest TEC grid point using a K-D tree.
-
-Output
-------
-grace_data_merged_v3.parquet  — GRACE DataFrame with matched TEC columns appended.
+MergeTecGrace2.py
+- Reads GRACE and TEC parquet files into memory.
+- Matches each GRACE point to the nearest TEC grid cell using a K-D tree.
+- Saves the merged dataset with matched_tec_value added as grace_data_merged_v3.parquet.
 """
 
 import os

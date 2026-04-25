@@ -1,3 +1,10 @@
+"""
+pymsis_utils.py
+- Dask-based helpers for loading GRACE data and joining space weather indices.
+- Fetches and interpolates F10.7 and Ap to hourly cadence from the spaceweather package.
+- Wraps pymsis.calculate for fly-through and fixed-altitude MSIS runs.
+"""
+
 import os
 from pathlib import Path
 from typing import Tuple, Dict, Any

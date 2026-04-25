@@ -1,3 +1,9 @@
+"""
+run_pymsis.py
+- Loads GRACE observations and filters to the 2009–2016 training window.
+- Fetches F10.7 and Ap space weather indices via pymsis, then runs NRLMSISE-2.1.
+- Saves the result with an msis_rho column added as a parquet file.
+"""
 
 # %%
 from pathlib import Path
@@ -5,7 +11,7 @@ import pandas as pd
 import numpy as np
 import os, sys, pathlib
 import dask.dataframe as dd
-import functions_pymis_dd2 as func_pymis
+import pymsis_utils as func_pymis
 import pymsis
 # %%
 #df = pd.read_parquet("grace_dns_2009_2016_04092025_v2.parquet", engine="pyarrow")

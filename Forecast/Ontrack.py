@@ -1,3 +1,10 @@
+"""
+Ontrack.py
+- Runs rolling warm-start forecasts on data outside the 2009–2016 training window.
+- Fine-tunes the base model each step using the previous 5 days, with early stopping.
+- Tests 8 combinations of retrain/no-retrain, pre/post-training dates, and 1 or 3-day horizons.
+"""
+
 # %% --------------------------------- IMPORTS ---------------------------------
 import os
 import sys

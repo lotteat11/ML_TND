@@ -1,13 +1,8 @@
 """
-Training script for the XGBoost density correction model.
-
-Run:
-    python train.py
-
-Outputs:
-    xgb_model_test.json          — trained model
-    scaler_xgboost_X_test.joblib — feature scaler
-    scaler_xgboost_y_test.joblib — target scaler
+train.py
+- Loads GRACE data, engineers features, and splits into train/val/test using cyclic time blocks.
+- Trains an XGBoost model to predict log(rho_obs / rho_msis) as the correction target.
+- Saves the trained model and MinMax scalers to disk.
 """
 
 import os

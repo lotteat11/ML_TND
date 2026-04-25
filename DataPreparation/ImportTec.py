@@ -1,27 +1,12 @@
-# %%
-import os
-import re
-import requests
-from tqdm import trange # Import tqdm for a nice progress bar
-# %%
+"""
+ImportTec.py
+- Downloads IONEX TEC files from NASA CDDIS (requires Earthdata login in .netrc).
+- Parses the IONEX format into epoch/latitude/longitude/tec_value rows.
+- Saves the combined output as a parquet file.
+"""
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-"""
-IONEX downloader + parser for CODE GIM (and other IGS centers).
-
-Features:
-- Earthdata-authenticated HTTPS downloads from NASA CDDIS with response validation.
-- Auto-detect compression (LZW .Z vs. GZIP .gz served as .Z) by magic bytes.
-- Parse IONEX (.i) files into a tidy DataFrame: epoch, center, latitude, longitude, tec_value.
-- Handles both .Z and .i in the input folder; filters by requested years; saves CSV/Parquet.
-- Prints coverage sanity (years present, counts by year, newest timestamps).
-
-References:
-- CDDIS Archive Access (Earthdata Login, HTTPS, .netrc examples): https://www.earthdata.nasa.gov/centers/cddis-daac/archive-access
-- Magic bytes: gzip (1F 8B), UNIX compress .Z (1F 9D): http://fileformats.archiveteam.org/wiki/GZIP
-"""
 
 import os
 import re

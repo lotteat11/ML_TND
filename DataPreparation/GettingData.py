@@ -1,13 +1,8 @@
-#"""
-Thermosphere neutral density pipeline
-======================================
-Downloads, extracts, and concatenates Swarm or GRACE DNS files
-from the TU Delft FTP server into a single parquet.
-
-Configuration
--------------
-Edit the CONFIG block below, then run:
-    python thermo_density_pipeline.py
+"""
+GettingData.py
+- Downloads GRACE or Swarm DNS files from the TU Delft FTP server.
+- Parses the ASCII text format and stacks all years into one dataframe.
+- Saves the result as a single parquet file.
 """
 
 import re

@@ -1,3 +1,10 @@
+"""
+Feature_functions.py
+- Feature engineering helpers: LST/DOY trig features, TEC lag columns, lon encoding.
+- Data splitting (cyclic time-block), scaling, and inverse-transform utilities.
+- Plotting functions shared across train, evaluate, and forecast scripts.
+"""
+
 import os
 import pickle
 from pathlib import Path
