@@ -1,80 +1,109 @@
-Adaptive Thermospheric Density Modeling with TEC Coupling
+# Adaptive Thermospheric Density Modeling with TEC Coupling
+
+XGBoost model that corrects NRLMSISE-2.1 density predictions using GRACE satellite observations and ionospheric TEC. The model learns the log-ratio `log(rho_obs / rho_msis)` and applies it as a correction on top of MSIS at inference time.
+
+---
 
 ## Setup
 
 ```bash
-pip install -r requirements.txt
+./setup.sh
 ```
 
+This installs `libomp` on macOS (required by XGBoost) and runs `pip install -r requirements.txt`.
+
+---
+
+## Repository Structure
+
+```
+ML_TND/
+├── DataPreparation/
+│   ├── GettingData.py       # Download GRACE/Swarm DNS from TU Delft FTP
+│   ├── ImportTec.py         # Download and parse IONEX TEC files from NASA CDDIS
+│   ├── run_pymsis.py        # Run NRLMSISE-2.1 on GRACE data, add msis_rho column
+│   ├── pymsis_utils.py      # Helper functions for MSIS and space weather fetching
+│   └── MergeTecGrace2.py    # Match TEC to GRACE using K-D tree, save merged parquet
+├── CoreModel/
+│   ├── config.py            # Shared config: file paths, features, target
+│   ├── train.py             # Train XGBoost model, save model + scalers
+│   ├── evaluate.py          # Load saved model, run diagnostics and plots
+│   └── plotting.py          # Plotting utilities for train/eval
+├── Forecast/
+│   ├── Ontrack.py           # Rolling warm-start forecast on out-of-sample data
+│   └── off_track.py         # Global grid prediction + Swarm validation
+└── Feature_functions.py     # Feature engineering, splitting, scaling, shared plots
+```
+
+---
+
+## Pipeline — run in this order
+
+### 1. Download satellite density data
 ```bash
-brew install libomp
+python DataPreparation/GettingData.py
 ```
+Downloads GRACE or Swarm DNS files from TU Delft FTP. Configure `MISSION`, `YEARS`, and output paths at the top of the file.
 
+### 2. Download TEC data
+```bash
+python DataPreparation/ImportTec.py
+```
+Downloads CODE GIM IONEX files from NASA CDDIS. Requires Earthdata credentials in `~/.netrc`. Outputs a TEC parquet file.
 
+### 3. Add MSIS density to GRACE data
+```bash
+python DataPreparation/run_pymsis.py
+```
+Fetches F10.7 and Ap indices via pymsis, runs NRLMSISE-2.1 for each GRACE point, and saves `grace_dns_with_tnd_y200916_v4_0809.parquet`.
 
-This repository contains the full data processing, modeling, validation, and forecasting pipeline used in the study of adaptive thermospheric neutral density modeling using satellite observations and ionospheric Total Electron Content (TEC).
-The code supports:
+### 4. Merge TEC with GRACE
+```bash
+python DataPreparation/MergeTecGrace2.py
+```
+Spatially matches TEC grid cells to GRACE points using a K-D tree (±3 hour window). Outputs `grace_data_merged_v3.parquet`.
 
-reproducible data preparation from satellite products,
-machine‑learning–based density correction using XGBoost,
-rigorous time‑aware validation,
-adaptive on‑track and off‑track forecasting experiments.
+### 5. Train the model
+```bash
+cd CoreModel && python train.py
+```
+Loads `grace_data_merged_v3.parquet`, engineers features, splits into train/val/test using cyclic time blocks, and trains XGBoost. Saves `xgb_model_v3.json`, `scaler_xgboost_X_v3.joblib`, `scaler_xgboost_y_v3.joblib`.
 
+### 6. Evaluate
+```bash
+cd CoreModel && python evaluate.py
+```
+Loads the saved model and scalers, runs on val/test splits, and produces diagnostic plots. Requires step 5 to have been run first.
 
-Repository Structure
-.
-├── data_preparation/
-│   ├── get_grace_swarm.py
-│   ├── import_tec.py
-│   ├── merge_grace_tec.py
-│   └── README.md
-│
-├── modeling/
-│   └── train.py
-│
-├── validation/
-│   └── evaluate.py
-│
-├── forecasting/
-│   ├── run_ontrack_forecast.py
-│   └── run_offtrack_forecast.py
-│
-├── config.py
-├── Feature_functions.py
-├── environment.yml   (or requirements.txt)
-└── README.md
+### 7. Rolling forecast (out-of-sample)
+```bash
+cd Forecast && python Ontrack.py
+```
+Runs on data outside the training window (pre-2009 or post-2016). Fine-tunes the model on the previous 5 days at each step, then predicts 1 or 3 days ahead. Tests 8 combinations and saves results to `runs/`.
 
+### 8. Global density map
+```bash
+cd Forecast && python off_track.py
+```
+Builds a global lat/lon grid for a chosen UTC snapshot, runs MSIS, and applies a warm-start model snapshot to predict density worldwide. Optionally overlays Swarm observations.
 
-Data Preparation (data_preparation/)
-This folder contains the three‑step pipeline used to construct the machine‑learning input dataset.
+---
 
+## Key files needed (not in repo — too large)
 
-Satellite density data
-get_grace_swarm.py
-Downloads and parses thermospheric neutral density (DNS) products from the TU Delft Thermosphere archive (GRACE or Swarm).
+| File | Created by |
+|---|---|
+| `grace_dns_with_tnd_y200916_v4_0809.parquet` | Step 3 |
+| `grace_data_merged_v3.parquet` | Step 4 |
+| `xgb_model_v3.json` | Step 5 |
+| `scaler_xgboost_X_v3.joblib` | Step 5 |
+| `scaler_xgboost_y_v3.joblib` | Step 5 |
 
+---
 
-TEC data
-import_tec.py
-Downloads and parses CODE Global Ionosphere Maps (IONEX TEC data) from NASA CDDIS.
+## Model details
 
-
-GRACE × TEC matching
-merge_grace_tec.py
-Temporally matches TEC to GRACE observations (±3 hours) and spatially collocates TEC values using a spherical nearest‑neighbor (K‑D tree) approach.
-
-
-Output:
-A merged Parquet dataset used by all downstream modeling steps.
-
-Model Training (modeling/train.py)
-This script trains the core XGBoost density‑correction model.
-Key characteristics:
-
-Feature engineering (LST, DOY, trigonometric encodings)
-Target defined as
-log⁡(ρobs/ρMSIS)\log(\rho_{\text{obs}} / \rho_{\text{MSIS}})log(ρobs​/ρMSIS​)
-
-Time‑aware splitting using a repeated time‑block strategy with 7 cycles
-Feature and target scaling
-Model and scalers saved to disk
+- **Target:** `log(rho_obs / rho_msis)` — correction on top of MSIS
+- **Features:** 15 inputs including F10.7, Ap, altitude, latitude, LST/DOY trig encodings, TEC, and TEC lags
+- **Split:** cyclic time-block (8 cycles, 2/3 train / 1/6 val / 1/6 test, 1100-obs buffer)
+- **Hyperparameters:** `max_depth=4`, `min_child_weight=300`, `subsample=0.5`, `colsample_bytree=0.6`, `num_boost_round=1360`
