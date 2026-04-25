@@ -29,7 +29,7 @@ ML_TND/
 │   ├── evaluate.py          # Load saved model, run diagnostics and plots
 │   └── plotting.py          # Plotting utilities for train/eval
 ├── Forecast/
-│   ├── ontrack.py            # Rolling warm-start forecast on out-of-sample data
+│   ├── on_track.py           # Rolling warm-start forecast on out-of-sample data
 │   ├── off_track.py         # Global grid prediction + Swarm validation
 │   └── swarm_validation.py  # Collocate Swarm obs to model grid, compute metrics
 └── feature_functions.py     # Feature engineering, splitting, scaling, shared plots
@@ -77,7 +77,7 @@ Loads `MODEL`, `SCALER_X`, `SCALER_Y`, runs on val/test splits, and produces dia
 
 ### 7. Rolling forecast (out-of-sample)
 ```bash
-cd Forecast && python ontrack.py
+cd Forecast && python on_track.py
 ```
 Runs on data outside the training window (pre-2009 or post-2016). Fine-tunes the model on the previous 5 days at each step, then predicts 1 or 3 days ahead. Tests 8 combinations (retrain on/off × pre2009/post2016 × horizon 1/3) and writes outputs to `runs/`:
 
@@ -92,8 +92,8 @@ runs/
     └── val_densities_<tag>.png
 ```
 
-During the rolling forecast, a warm-start model snapshot is saved for **one specific date** controlled by `DATE_TO_SAVE_MODEL` at the top of `ontrack.py`. That snapshot captures the model state after it has been fine-tuned on data up to that date, and is the input for Step 8. To use a different date:
-1. Set `DATE_TO_SAVE_MODEL` in `ontrack.py` and re-run Step 7.
+During the rolling forecast, a warm-start model snapshot is saved for **one specific date** controlled by `DATE_TO_SAVE_MODEL` at the top of `on_track.py`. That snapshot captures the model state after it has been fine-tuned on data up to that date, and is the input for Step 8. To use a different date:
+1. Set `DATE_TO_SAVE_MODEL` in `on_track.py` and re-run Step 7.
 2. Set `model_file` in the `Config` at the top of `off_track.py` to the path of the new snapshot.
 
 ### 7b. Add MSIS density to Swarm data (needed for Step 8)
