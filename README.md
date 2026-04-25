@@ -42,7 +42,7 @@ ML_TND/
 ```bash
 python DataPreparation/GettingData.py
 ```
-Downloads GRACE or Swarm DNS files from TU Delft FTP. Configure `MISSION`, `YEARS`, and output paths at the top of the file.
+Downloads GRACE DNS files from TU Delft FTP. Set `MISSION = "GRACE"`, `YEARS = (2009, 2016)`, and `PARQUET_OUT = "grace_dns_2009_2016.parquet"` at the top of the file. Outputs `grace_dns_2009_2016.parquet`.
 
 ### 2. Download TEC data
 ```bash
@@ -54,7 +54,7 @@ Downloads CODE GIM IONEX files from NASA CDDIS. Requires Earthdata credentials i
 ```bash
 python DataPreparation/run_pymsis.py
 ```
-Fetches F10.7 and Ap indices via pymsis, runs NRLMSISE-2.1 for each GRACE point, and saves `grace_dns_with_tnd_y200916_v4_0809.parquet`.
+Reads `grace_dns_2009_2016.parquet` (from Step 1), fetches F10.7 and Ap indices via pymsis, runs NRLMSISE-2.1 for each GRACE point, and saves `grace_dns_with_tnd_y200916_v4_0809.parquet`.
 
 ### 4. Merge TEC with GRACE
 ```bash
@@ -98,6 +98,7 @@ Collocates Swarm observations (scaled to GRACE altitude) to the model grid and c
 
 | File | Created by |
 |---|---|
+| `grace_dns_2009_2016.parquet` | Step 1 |
 | `grace_dns_with_tnd_y200916_v4_0809.parquet` | Step 3 |
 | `tec_codg_2009-2017_doy1-365_v2.parquet` | Step 2 |
 | `grace_data_merged_v3.parquet` | Step 4 |
