@@ -79,7 +79,20 @@ Loads `MODEL`, `SCALER_X`, `SCALER_Y`, runs on val/test splits, and produces dia
 ```bash
 cd Forecast && python ontrack.py
 ```
-Runs on data outside the training window (pre-2009 or post-2016). Fine-tunes the model on the previous 5 days at each step, then predicts 1 or 3 days ahead. Tests 8 combinations and saves results to `runs/`.
+Runs on data outside the training window (pre-2009 or post-2016). Fine-tunes the model on the previous 5 days at each step, then predicts 1 or 3 days ahead. Tests 8 combinations (retrain on/off × pre2009/post2016 × horizon 1/3) and writes outputs to `runs/`:
+
+```
+runs/
+├── summary_metrics.csv                          # cross-run comparison
+└── <tag>/                                       # e.g. dr1_post2016_h3
+    ├── xgb_model_original_<tag>.json            # model before warm-start
+    ├── xgb_model_saved_<tag>_start_<date>.json  # mid-run snapshot (used by Step 8)
+    ├── xgb_model_updated_<tag>.json             # fully updated final model
+    ├── predictions_<tag>.csv
+    └── val_densities_<tag>.png
+```
+
+The snapshot file (`xgb_model_saved_*`) is what Step 8 loads. Set `model_file` in the `Config` at the top of `off_track.py` to point to the desired snapshot.
 
 ### 7b. Add MSIS density to Swarm data (needed for Step 8)
 ```bash
