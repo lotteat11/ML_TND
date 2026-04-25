@@ -1,6 +1,5 @@
-
-
-
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 swarm_validation.py
 - Collocates Swarm observations (scaled to GRACE altitude) to the model prediction grid.

@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 off_track.py
 - Builds a global lat/lon grid for a chosen UTC snapshot and runs NRLMSISE-2.1 on it.

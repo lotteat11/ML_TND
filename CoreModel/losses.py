@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 Custom XGBoost loss functions and learning-rate scheduler.
 """

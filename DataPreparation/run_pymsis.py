@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 run_pymsis.py
 - Loads GRACE observations and filters to the 2009–2016 training window.

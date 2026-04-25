@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 MergeTecGrace2.py
 - Reads GRACE and TEC parquet files into memory.

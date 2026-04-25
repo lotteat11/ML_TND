@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 train.py
 - Loads GRACE merged data, engineers features including TEC lags and interaction terms.

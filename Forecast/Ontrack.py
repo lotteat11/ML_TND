@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 Ontrack.py
 - Runs rolling warm-start forecasts on data outside the 2009–2016 training window.

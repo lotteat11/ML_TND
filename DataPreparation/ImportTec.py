@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 ImportTec.py
 - Downloads IONEX TEC files from NASA CDDIS (requires Earthdata login in .netrc).

@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 GettingData.py
 - Downloads GRACE or Swarm DNS files from the TU Delft FTP server.

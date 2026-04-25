@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 Plotting functions for the XGBoost density correction pipeline.
 """

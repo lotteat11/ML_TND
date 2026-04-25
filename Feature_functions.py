@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 Feature_functions.py
 - Feature engineering helpers: LST/DOY trig features, TEC lag columns, lon encoding.

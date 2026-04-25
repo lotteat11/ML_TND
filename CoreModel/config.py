@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 config.py
 - Central config for file paths, feature list, and target variable.

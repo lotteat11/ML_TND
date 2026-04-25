@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 evaluate.py
 - Loads the saved model and scalers produced by train.py (run that first).

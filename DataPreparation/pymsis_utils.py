@@ -1,3 +1,5 @@
+# Author: Lotte Ansgaard Thomsen
+# Aalborg University
 """
 pymsis_utils.py
 - Dask-based helpers for loading GRACE data and joining space weather indices.
