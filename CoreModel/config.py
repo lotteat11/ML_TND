@@ -5,10 +5,14 @@ config.py
 - Feature set and scaling columns match the v3 model (15 features, includes TEC lags).
 """
 
-PARQUET_FILE  = "grace_data_merged_v3.parquet"
-MODEL_OUT     = "xgb_model_v3.json"
-SCALER_X_OUT  = "scaler_xgboost_X_v3.joblib"
-SCALER_Y_OUT  = "scaler_xgboost_y_v3.joblib"
+from pathlib import Path
+
+ROOT = Path(__file__).parent.parent
+
+PARQUET_FILE  = ROOT / "grace_data_merged_v3.parquet"
+MODEL_OUT     = ROOT / "xgb_model_v3.json"
+SCALER_X_OUT  = ROOT / "scaler_xgboost_X_v3.joblib"
+SCALER_Y_OUT  = ROOT / "scaler_xgboost_y_v3.joblib"
 
 TIME_MIN      = "2009-06-01"
 TIME_MAX      = "2016-01-01"
