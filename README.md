@@ -43,37 +43,37 @@ ML_TND/
 ```bash
 python DataPreparation/GettingData.py
 ```
-Downloads GRACE DNS files from TU Delft FTP. Set `MISSION = "GRACE"`, `YEARS = (2009, 2016)`, and `PARQUET_OUT = "grace_dns_2009_2016.parquet"` at the top of the file. Outputs `grace_dns_2009_2016.parquet`.
+Downloads GRACE DNS files from TU Delft FTP. Set `MISSION = "GRACE"`, `YEARS = (2009, 2016)`, and `PARQUET_OUT` at the top of the file. Outputs `GRACE_RAW`.
 
 ### 2. Download TEC data
 ```bash
 python DataPreparation/ImportTec.py
 ```
-Downloads CODE GIM IONEX files from NASA CDDIS. Requires Earthdata credentials in `~/.netrc`. Outputs `tec_codg_2009-2017_doy1-365_v2.parquet`.
+Downloads CODE GIM IONEX files from NASA CDDIS. Requires Earthdata credentials in `~/.netrc`. Outputs `TEC_RAW`.
 
 ### 3. Add MSIS density to GRACE data
 ```bash
 python DataPreparation/run_pymsis.py
 ```
-Reads `grace_dns_2009_2016.parquet` (from Step 1), fetches F10.7 and Ap indices via pymsis, runs NRLMSISE-2.1 for each GRACE point, and saves `grace_dns_with_tnd_y200916_v4_0809.parquet`.
+Reads `GRACE_RAW` (Step 1), fetches F10.7 and Ap indices via pymsis, runs NRLMSISE-2.1 for each GRACE point, and saves `GRACE_MSIS`.
 
 ### 4. Merge TEC with GRACE
 ```bash
 python DataPreparation/MergeTecGrace2.py
 ```
-Spatially matches TEC grid cells to GRACE points using a K-D tree (±3 hour window). Outputs `grace_data_merged_v3.parquet`.
+Spatially matches TEC grid cells to GRACE points using a K-D tree (±3 hour window). Reads `GRACE_MSIS` and `TEC_RAW`. Outputs `GRACE_MERGED`.
 
 ### 5. Train the model
 ```bash
 cd CoreModel && python train.py
 ```
-Loads `grace_data_merged_v3.parquet`, engineers features, splits into train/val/test using cyclic time blocks, and trains XGBoost. Saves `xgb_model_v3.json`, `scaler_xgboost_X_v3.joblib`, `scaler_xgboost_y_v3.joblib`.
+Reads `GRACE_MERGED`, engineers features, splits into train/val/test using cyclic time blocks, and trains XGBoost. Saves `MODEL`, `SCALER_X`, `SCALER_Y`.
 
 ### 6. Evaluate
 ```bash
 cd CoreModel && python evaluate.py
 ```
-Loads the saved model and scalers, runs on val/test splits, and produces diagnostic plots. Requires step 5 to have been run first.
+Loads `MODEL`, `SCALER_X`, `SCALER_Y`, runs on val/test splits, and produces diagnostic plots. Requires step 5 to have been run first.
 
 ### 7. Rolling forecast (out-of-sample)
 ```bash
@@ -85,7 +85,7 @@ Runs on data outside the training window (pre-2009 or post-2016). Fine-tunes the
 ```bash
 python DataPreparation/run_pymsis_swarm.py
 ```
-Reads `swarm_dns_2015_2016_03092025.parquet` (download via `GettingData.py` with `MISSION = "Swarm"`, `YEARS = (2015, 2016)`), joins hourly space weather indices, and runs NRLMSISE-2.1 at both satellite altitude and 400 km. Saves `swarm_dns_with_tnd_y2001516_v1_0309.parquet`.
+Reads `SWARM_RAW` (download via `GettingData.py` with `MISSION = "Swarm"`, `YEARS = (2015, 2016)`), joins hourly space weather indices, and runs NRLMSISE-2.1 at both satellite altitude and 400 km. Saves `SWARM_MSIS`.
 
 ### 8. Global density map
 ```bash
@@ -103,16 +103,19 @@ Collocates Swarm observations (scaled to GRACE altitude) to the model grid and c
 
 ## Key files needed (not in repo — too large)
 
-| File | Created by |
-|---|---|
-| `grace_dns_2009_2016.parquet` | Step 1 |
-| `grace_dns_with_tnd_y200916_v4_0809.parquet` | Step 3 |
-| `tec_codg_2009-2017_doy1-365_v2.parquet` | Step 2 |
-| `swarm_dns_with_tnd_y2001516_v1_0309.parquet` | Step 7b |
-| `grace_data_merged_v3.parquet` | Step 4 |
-| `xgb_model_v3.json` | Step 5 |
-| `scaler_xgboost_X_v3.joblib` | Step 5 |
-| `scaler_xgboost_y_v3.joblib` | Step 5 |
+All paths are defined as constants in [`paths.py`](paths.py). Actual filenames are listed there.
+
+| Name in `paths.py` | Created by | Used by |
+|---|---|---|
+| `GRACE_RAW` | Step 1 | Step 3 |
+| `TEC_RAW` | Step 2 | Step 4 |
+| `SWARM_RAW` | Step 1 (Swarm mission) | Step 7b |
+| `GRACE_MSIS` | Step 3 | Step 4 |
+| `SWARM_MSIS` | Step 7b | Step 8 |
+| `GRACE_MERGED` | Step 4 | Step 5 |
+| `MODEL` | Step 5 | Step 6, 7, 8 |
+| `SCALER_X` | Step 5 | Step 6, 7, 8 |
+| `SCALER_Y` | Step 5 | Step 6, 7, 8 |
 
 ---
 
