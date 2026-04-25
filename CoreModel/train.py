@@ -10,18 +10,17 @@ Outputs:
     scaler_xgboost_y_test.joblib — target scaler
 """
 
-import importlib
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import joblib
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 
 import Feature_functions as ff
-importlib.reload(ff)
 
 from config import (
     PARQUET_FILE, MODEL_OUT, SCALER_X_OUT, SCALER_Y_OUT,
@@ -121,7 +120,6 @@ if __name__ == "__main__":
         "importance": model.feature_importances_,
     }).sort_values("importance", ascending=False)
     print(feat_imp.head(13))
-    import matplotlib.pyplot as plt
     plt.figure(figsize=(8, 6))
     xgb.plot_importance(model, importance_type="gain", max_num_features=20)
     plt.show()

@@ -11,7 +11,6 @@ Requires that train.py has already been run to produce:
     xgb_model_test.json, scaler_xgboost_X_test.joblib, scaler_xgboost_y_test.joblib
 """
 
-import importlib
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,7 +22,6 @@ import xgboost as xgb
 from sklearn.metrics import mean_squared_error
 
 import Feature_functions as ff
-importlib.reload(ff)
 
 from config import (
     PARQUET_FILE, MODEL_OUT, SCALER_X_OUT, SCALER_Y_OUT,
@@ -57,16 +55,14 @@ if __name__ == "__main__":
             copy=False,
         )
 
-    # 2. Load scalers and scale
+    # 2. Load scalers and transform (no refitting — uses the scalers from training)
     scaler_X = joblib.load(SCALER_X_OUT)
     scaler_y = joblib.load(SCALER_Y_OUT)
 
-    X_train_s, X_val_s, X_test_s, y_train_s, y_val_s, y_test_s, _, _ = \
-        ff.scale_simple(
-            X_train, X_val, X_test,
-            y_train, y_val, y_test,
-            cols_to_scale=COLS_TO_SCALE,
-        )
+    X_val_s  = ff.scale_transform(X_val,  scaler_X, COLS_TO_SCALE)
+    X_test_s = ff.scale_transform(X_test, scaler_X, COLS_TO_SCALE)
+    y_val_s  = ff.scale_y_transform(y_val,  scaler_y)
+    y_test_s = ff.scale_y_transform(y_test, scaler_y)
 
     # 3. Load model and predict
     model = xgb.XGBRegressor()
