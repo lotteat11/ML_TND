@@ -20,6 +20,7 @@ ML_TND/
 │   ├── GettingData.py       # Download GRACE/Swarm DNS from TU Delft FTP
 │   ├── ImportTec.py         # Download and parse IONEX TEC files from NASA CDDIS
 │   ├── run_pymsis.py        # Run NRLMSISE-2.1 on GRACE data, add msis_rho column
+│   ├── run_pymsis_swarm.py  # Run NRLMSISE-2.1 on Swarm data, add tnd columns
 │   ├── pymsis_utils.py      # Helper functions for MSIS and space weather fetching
 │   └── MergeTecGrace2.py    # Match TEC to GRACE using K-D tree, save merged parquet
 ├── CoreModel/
@@ -80,6 +81,12 @@ cd Forecast && python Ontrack.py
 ```
 Runs on data outside the training window (pre-2009 or post-2016). Fine-tunes the model on the previous 5 days at each step, then predicts 1 or 3 days ahead. Tests 8 combinations and saves results to `runs/`.
 
+### 7b. Add MSIS density to Swarm data (needed for Step 8)
+```bash
+python DataPreparation/run_pymsis_swarm.py
+```
+Reads `swarm_dns_2015_2016_03092025.parquet` (download via `GettingData.py` with `MISSION = "Swarm"`, `YEARS = (2015, 2016)`), joins hourly space weather indices, and runs NRLMSISE-2.1 at both satellite altitude and 400 km. Saves `swarm_dns_with_tnd_y2001516_v1_0309.parquet`.
+
 ### 8. Global density map
 ```bash
 cd Forecast && python off_track.py
@@ -101,6 +108,7 @@ Collocates Swarm observations (scaled to GRACE altitude) to the model grid and c
 | `grace_dns_2009_2016.parquet` | Step 1 |
 | `grace_dns_with_tnd_y200916_v4_0809.parquet` | Step 3 |
 | `tec_codg_2009-2017_doy1-365_v2.parquet` | Step 2 |
+| `swarm_dns_with_tnd_y2001516_v1_0309.parquet` | Step 7b |
 | `grace_data_merged_v3.parquet` | Step 4 |
 | `xgb_model_v3.json` | Step 5 |
 | `scaler_xgboost_X_v3.joblib` | Step 5 |
