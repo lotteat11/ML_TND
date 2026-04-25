@@ -25,7 +25,7 @@ import Feature_functions as ff  # noqa: F401  (kept for side-effects / downstrea
 # ---------------------------------------------------------------------------
 
 GRACE_PARQUET   = "grace_dns_with_tnd_y200916_v4_0809.parquet"
-TEC_PARQUET     = "tec_codg_2009-2017_doy1-365.parquet"
+TEC_PARQUET     = "tec_codg_2009-2017_doy1-365_v2.parquet"
 OUTPUT_PARQUET  = "grace_data_merged_v3.parquet"
 
 GRACE_TIME_MAX  = "2016-01-01"          # exclusive upper bound

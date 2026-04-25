@@ -48,7 +48,7 @@ Downloads GRACE or Swarm DNS files from TU Delft FTP. Configure `MISSION`, `YEAR
 ```bash
 python DataPreparation/ImportTec.py
 ```
-Downloads CODE GIM IONEX files from NASA CDDIS. Requires Earthdata credentials in `~/.netrc`. Outputs a TEC parquet file.
+Downloads CODE GIM IONEX files from NASA CDDIS. Requires Earthdata credentials in `~/.netrc`. Outputs `tec_codg_2009-2017_doy1-365_v2.parquet`.
 
 ### 3. Add MSIS density to GRACE data
 ```bash
@@ -99,6 +99,7 @@ Collocates Swarm observations (scaled to GRACE altitude) to the model grid and c
 | File | Created by |
 |---|---|
 | `grace_dns_with_tnd_y200916_v4_0809.parquet` | Step 3 |
+| `tec_codg_2009-2017_doy1-365_v2.parquet` | Step 2 |
 | `grace_data_merged_v3.parquet` | Step 4 |
 | `xgb_model_v3.json` | Step 5 |
 | `scaler_xgboost_X_v3.joblib` | Step 5 |
