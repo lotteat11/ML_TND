@@ -138,5 +138,5 @@ All paths are defined as constants in [`paths.py`](paths.py). Actual filenames a
 
 - **Target:** `log(rho_obs / rho_msis)` — correction on top of MSIS
 - **Features:** 15 inputs including F10.7, Ap, altitude, latitude, LST/DOY trig encodings, TEC, and TEC lags
-- **Split:** cyclic time-block (8 cycles, 2/3 train / 1/6 val / 1/6 test, 1100-obs buffer)
+- **Split:** cyclic time-block (7 cycles, 2/3 train / 1/6 val / 1/6 test, 1100-obs buffer)
 - **Hyperparameters:** `max_depth=4`, `min_child_weight=300`, `subsample=0.5`, `colsample_bytree=0.6`, `num_boost_round=1360`
