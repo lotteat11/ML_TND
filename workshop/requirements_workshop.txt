@@ -7,4 +7,3 @@ scipy
 joblib
 pyarrow
 pymsis
-gdown

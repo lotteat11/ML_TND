@@ -20,29 +20,23 @@ of the full GRACE mission data:
 
 ---
 
-## Data hosting (one-time, by the maintainer)
+## Data files
 
-The data and model files are **gitignored** (`*.parquet`, `*.json`, `*.joblib`), so
-they are not in the GitHub repo. They live on Google Drive:
+The notebooks, the small trained model (`nb3_model_cyclic.json`), and the scaler are in
+the GitHub repo. The large data file is **not** — it is sent to participants directly:
 
-| File | Used by | Size |
-|---|---|---|
-| `grace_workshop.parquet` | NB1–NB4 | ~480 MB |
-| `nb3_model_cyclic.json` | NB4 | ~300 KB |
-| `nb3_scaler_cyclic.joblib` | NB4 | ~1 KB |
-| `tec` + `swarm` parquet | NB5 | varies |
-
-For each file: upload to Drive → **Share → Anyone with the link (Viewer)** → copy the
-ID from the link `https://drive.google.com/file/d/<FILE_ID>/view`. Paste each `<FILE_ID>`
-into the **Colab setup cell** at the top of the relevant notebook (placeholders marked
-`REPLACE_WITH_..._FILE_ID`).
+| File | Used by | Size | Where it comes from |
+|---|---|---|---|
+| `grace_workshop.parquet` | NB1–NB4 | ~480 MB | sent to you; you upload it |
+| `nb3_model_cyclic.json` | NB4 | ~300 KB | in the repo (also made by NB3) |
+| `nb3_scaler_cyclic.joblib` | NB4 | ~1 KB | in the repo (also made by NB3) |
+| `tec` + `swarm` parquet | NB5 | varies | sent to you; you upload them |
 
 ---
 
 ## Option A — Run locally
 
-**Step 1.** Clone the repository and place `grace_workshop.parquet` in the repo root
-(and the `nb3_*` files in `workshop/` if you want to run NB4 without first running NB3):
+**Step 1.** Clone the repository and place `grace_workshop.parquet` in the repo root:
 ```
 git clone https://github.com/lotteat11/ML_TND
 cd ML_TND
@@ -51,7 +45,7 @@ cd ML_TND
 **Step 2.** Install the required packages (needs scikit-learn ≥ 1.4 for
 `root_mean_squared_error`):
 ```
-pip install -r workshop/requirements_workshop.txt gdown
+pip install -r workshop/requirements_workshop.txt
 ```
 
 **Step 3.** Start Jupyter:
@@ -70,20 +64,21 @@ Open `NB1_baseline.ipynb` and run top to bottom. The Colab setup cell is a no-op
 **Step 2.** Click **File → Open notebook → GitHub tab**, enter
 `https://github.com/lotteat11/ML_TND`, and select a notebook from the `workshop/` folder.
 
-**Step 3.** Run the **Colab setup cell** at the top (the first code cell). It clones the
-repo, downloads the data from Google Drive via `gdown`, and `chdir`s into `workshop/`.
-The Drive `FILE_ID` placeholders in that cell must already be filled in (see *Data
-hosting* above). No runtime restart is required.
+**Step 3.** Upload `grace_workshop.parquet` using the **Files pane** (the folder icon on
+the left sidebar → upload button). It lands at `/content/grace_workshop.parquet`.
 
-**Step 4.** Run the rest of the notebook top to bottom.
+**Step 4.** Run the **Colab setup cell** at the top (the first code cell). It clones the
+repo for the code modules, moves your uploaded parquet into place, and `chdir`s into
+`workshop/`. No runtime restart is required.
+
+**Step 5.** Run the rest of the notebook top to bottom.
 
 ---
 
 ## Note on NB5 (Swarm validation)
 
-NB5 additionally installs `cartopy` and downloads the `tec` and `swarm` parquet files —
-this is already handled by NB5's Colab setup cell once you fill in its `TEC_ID` and
-`SWARM_ID` placeholders.
+NB5 additionally installs `cartopy` and needs the `tec` and `swarm` parquet files —
+upload those to the Files pane (`/content/`) the same way as the GRACE file.
 
 ---
 
@@ -91,8 +86,8 @@ this is already handled by NB5's Colab setup cell once you fill in its `TEC_ID` 
 
 | Notebook | What it needs |
 |---|---|
-| NB1 | `grace_workshop.parquet` (in repo) |
+| NB1 | `grace_workshop.parquet` |
 | NB2 | same |
 | NB3 | same — saves `nb3_model_cyclic.json` |
-| NB4 | same + `nb3_model_cyclic.json` from NB3 |
+| NB4 | same + `nb3_model_cyclic.json` (in repo, or from NB3) |
 | NB5 | `tec` and `swarm` parquet files + `cartopy` |
