@@ -71,7 +71,7 @@ Open `NB1_baseline.ipynb` and run top to bottom. The Colab setup cell is a no-op
 
 ## Option B — Run in Google Colab
 
-**Step 1.** Open a notebook directly in Colab by clicking this link (or manually follow Step 2–3):
+**Step 1.** Open a notebook in Colab (click one of these direct links):
 
 - [NB1_baseline.ipynb](https://colab.research.google.com/github/lotteat11/ML_TND/blob/main/workshop/NB1_baseline.ipynb)
 - [NB2_feature_engineering.ipynb](https://colab.research.google.com/github/lotteat11/ML_TND/blob/main/workshop/NB2_feature_engineering.ipynb)
@@ -79,20 +79,17 @@ Open `NB1_baseline.ipynb` and run top to bottom. The Colab setup cell is a no-op
 - [NB4_edge_years.ipynb](https://colab.research.google.com/github/lotteat11/ML_TND/blob/main/workshop/NB4_edge_years.ipynb)
 - [NB5_swarm_validation.ipynb](https://colab.research.google.com/github/lotteat11/ML_TND/blob/main/workshop/NB5_swarm_validation.ipynb)
 
-Or manually:
+**Step 2.** Download `grace_workshop_small.parquet` from [GitHub Releases](https://github.com/lotteat11/ML_TND/releases/download/v1.0-workshop/grace_workshop_small.parquet) (~257 MB).
 
-**Step 2.** Go to [colab.research.google.com](https://colab.research.google.com), click **File → Open notebook → GitHub tab**, enter
-`https://github.com/lotteat11/ML_TND`, and select a notebook from the `workshop/` folder.
+**Step 3.** Upload the file to Colab:
+   - Click the **folder icon** on the left sidebar (Files pane)
+   - Click the **upload button** (↑ icon)
+   - Select `grace_workshop_small.parquet`
+   - Wait for upload to complete (shows file size in the pane)
 
-**Step 3.** Run the **Colab setup cell** at the top (the first code cell). It will:
-   - Clone the repository (for code modules)
-   - Download `grace_workshop_small.parquet` from GitHub Releases (~257 MB)
-   - Install Python dependencies
-   - Set up the working directory
+**Step 4.** Run the first cell (the setup check). It will verify the file is there.
 
-The download takes ~1–2 minutes. No runtime restart is required.
-
-**Step 4.** Run the rest of the notebook top to bottom.
+**Step 5.** Run the rest of the notebook top to bottom.
 
 ---
 
