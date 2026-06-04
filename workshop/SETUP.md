@@ -41,25 +41,21 @@ The small version is recommended for Colab uploads.
 
 ## Option A — Run locally
 
-**Step 1.** Install Git LFS (required to download the parquet file):
-
-- **macOS:** `brew install git-lfs`
-- **Ubuntu/Debian:** `sudo apt-get install git-lfs`
-- **Windows:** Download from [git-lfs.github.com](https://git-lfs.github.com)
-
-Then initialize LFS in your Git config (one time only):
-```
-git lfs install
-```
-
-**Step 2.** Clone the repository (Git LFS will automatically download the parquet):
+**Step 1.** Clone the repository:
 ```
 git clone https://github.com/lotteat11/ML_TND
 cd ML_TND
 ```
 
-**Step 3.** Install the required packages (needs scikit-learn ≥ 1.4 for
-`root_mean_squared_error`):
+**Step 2.** Download the workshop data file. Choose one:
+
+- **Option A1:** Download directly from [GitHub Releases](https://github.com/lotteat11/ML_TND/releases/download/v1.0-workshop/grace_workshop_small.parquet) and place in the repo root.
+- **Option A2:** Use `wget` or `curl`:
+  ```bash
+  wget https://github.com/lotteat11/ML_TND/releases/download/v1.0-workshop/grace_workshop_small.parquet
+  ```
+
+**Step 3.** Install the required packages:
 ```
 pip install -r workshop/requirements_workshop.txt
 ```
@@ -75,18 +71,26 @@ Open `NB1_baseline.ipynb` and run top to bottom. The Colab setup cell is a no-op
 
 ## Option B — Run in Google Colab
 
-**Step 1.** Go to [colab.research.google.com](https://colab.research.google.com)
+**Step 1.** Open a notebook directly in Colab by clicking this link (or manually follow Step 2–3):
 
-**Step 2.** Click **File → Open notebook → GitHub tab**, enter
+- [NB1_baseline.ipynb](https://colab.research.google.com/github/lotteat11/ML_TND/blob/main/workshop/NB1_baseline.ipynb)
+- [NB2_feature_engineering.ipynb](https://colab.research.google.com/github/lotteat11/ML_TND/blob/main/workshop/NB2_feature_engineering.ipynb)
+- [NB3_splitting.ipynb](https://colab.research.google.com/github/lotteat11/ML_TND/blob/main/workshop/NB3_splitting.ipynb)
+- [NB4_edge_years.ipynb](https://colab.research.google.com/github/lotteat11/ML_TND/blob/main/workshop/NB4_edge_years.ipynb)
+- [NB5_swarm_validation.ipynb](https://colab.research.google.com/github/lotteat11/ML_TND/blob/main/workshop/NB5_swarm_validation.ipynb)
+
+Or manually:
+
+**Step 2.** Go to [colab.research.google.com](https://colab.research.google.com), click **File → Open notebook → GitHub tab**, enter
 `https://github.com/lotteat11/ML_TND`, and select a notebook from the `workshop/` folder.
 
 **Step 3.** Run the **Colab setup cell** at the top (the first code cell). It will:
-   - Install Git LFS (needed to download the parquet from the repo)
-   - Clone the repository (Git LFS automatically downloads `grace_workshop_small.parquet`)
+   - Clone the repository (for code modules)
+   - Download `grace_workshop_small.parquet` from GitHub Releases (~257 MB)
    - Install Python dependencies
    - Set up the working directory
 
-No runtime restart is required.
+The download takes ~1–2 minutes. No runtime restart is required.
 
 **Step 4.** Run the rest of the notebook top to bottom.
 
