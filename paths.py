@@ -41,6 +41,11 @@ SWARM_MSIS = ROOT / "swarm_dns_with_tnd_y2001516_v1_0309.parquet"
 GRACE_MERGED = ROOT / "grace_data_merged_v3.parquet"
 
 # ---------------------------------------------------------------------------
+# Workshop dataset (filtered subset — see workshop/make_workshop_data.py)
+# ---------------------------------------------------------------------------
+GRACE_WORKSHOP = ROOT / "grace_workshop.parquet"
+
+# ---------------------------------------------------------------------------
 # Model artifacts (pipeline step 5)
 # ---------------------------------------------------------------------------
 MODEL    = ROOT / "xgb_model_v3.json"
