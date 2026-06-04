@@ -32,9 +32,10 @@ __pycache__/
 # macOS
 .DS_Store
 
-# Workshop — track the notebooks and the small model/scaler artifacts
-# (these override the broad *.ipynb / *.json / *.joblib rules above).
-# The large grace_workshop.parquet stays ignored (hosted on Google Drive).
+# Workshop — track the notebooks, model/scaler, and small parquet via Git LFS
+# (these override the broad *.ipynb / *.json / *.joblib / *.parquet rules above).
+# The full grace_workshop.parquet stays ignored (local dev only).
 !workshop/*.ipynb
 !workshop/nb3_model_cyclic.json
 !workshop/nb3_scaler_cyclic.joblib
+!grace_workshop_small.parquet
