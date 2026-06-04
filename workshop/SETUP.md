@@ -41,19 +41,30 @@ The small version is recommended for Colab uploads.
 
 ## Option A — Run locally
 
-**Step 1.** Clone the repository and place `grace_workshop_small.parquet` in the repo root:
+**Step 1.** Install Git LFS (required to download the parquet file):
+
+- **macOS:** `brew install git-lfs`
+- **Ubuntu/Debian:** `sudo apt-get install git-lfs`
+- **Windows:** Download from [git-lfs.github.com](https://git-lfs.github.com)
+
+Then initialize LFS in your Git config (one time only):
+```
+git lfs install
+```
+
+**Step 2.** Clone the repository (Git LFS will automatically download the parquet):
 ```
 git clone https://github.com/lotteat11/ML_TND
 cd ML_TND
 ```
 
-**Step 2.** Install the required packages (needs scikit-learn ≥ 1.4 for
+**Step 3.** Install the required packages (needs scikit-learn ≥ 1.4 for
 `root_mean_squared_error`):
 ```
 pip install -r workshop/requirements_workshop.txt
 ```
 
-**Step 3.** Start Jupyter:
+**Step 4.** Start Jupyter:
 ```
 jupyter notebook workshop/
 ```
@@ -69,14 +80,15 @@ Open `NB1_baseline.ipynb` and run top to bottom. The Colab setup cell is a no-op
 **Step 2.** Click **File → Open notebook → GitHub tab**, enter
 `https://github.com/lotteat11/ML_TND`, and select a notebook from the `workshop/` folder.
 
-**Step 3.** Upload `grace_workshop_small.parquet` using the **Files pane** (the folder
-icon on the left sidebar → upload button). It lands at `/content/grace_workshop_small.parquet`.
+**Step 3.** Run the **Colab setup cell** at the top (the first code cell). It will:
+   - Install Git LFS (needed to download the parquet from the repo)
+   - Clone the repository (Git LFS automatically downloads `grace_workshop_small.parquet`)
+   - Install Python dependencies
+   - Set up the working directory
 
-**Step 4.** Run the **Colab setup cell** at the top (the first code cell). It clones the
-repo for the code modules, moves your uploaded parquet into place, and `chdir`s into
-`workshop/`. No runtime restart is required.
+No runtime restart is required.
 
-**Step 5.** Run the rest of the notebook top to bottom.
+**Step 4.** Run the rest of the notebook top to bottom.
 
 ---
 
