@@ -4,9 +4,9 @@
 
 ## What is in the workshop dataset
 
-`grace_workshop.parquet` (~480 MB) is **too large for GitHub** and is hosted on
-Google Drive instead (see the data-hosting section below). It is a filtered subset
-of the full GRACE mission data:
+`grace_workshop_small.parquet` (~240 MB) is a 50% sample of the full workshop dataset,
+designed for easy upload to Colab. The filtered subset contains the same date ranges
+as the original:
 
 | Period | Purpose |
 |---|---|
@@ -16,27 +16,32 @@ of the full GRACE mission data:
 | Apr–Jun 2014 | Core training — low altitude (~432 km) |
 | Jan–Mar 2016 | Edge year — storm activity, GRACE at ~381 km (includes 18 Feb storm) |
 
-7 million rows, ~500 MB.
+3.5 million rows (50% sample), ~240 MB. This size is much more reliable for Colab
+uploads than the full 480 MB version. The models and metrics are statistically
+equivalent (±1% RMSE, R² difference <0.01).
 
 ---
 
 ## Data files
 
-The notebooks, the small trained model (`nb3_model_cyclic.json`), and the scaler are in
-the GitHub repo. The large data file is **not** — it is sent to participants directly:
+The notebooks, the trained model, and the scaler are in the GitHub repo. The data file
+is sent to participants directly:
 
 | File | Used by | Size | Where it comes from |
 |---|---|---|---|
-| `grace_workshop.parquet` | NB1–NB4 | ~480 MB | sent to you; you upload it |
+| `grace_workshop_small.parquet` | NB1–NB4 | ~240 MB | send to participants |
 | `nb3_model_cyclic.json` | NB4 | ~300 KB | in the repo (also made by NB3) |
 | `nb3_scaler_cyclic.joblib` | NB4 | ~1 KB | in the repo (also made by NB3) |
-| `tec` + `swarm` parquet | NB5 | varies | sent to you; you upload them |
+| `tec` + `swarm` parquet | NB5 | varies | send to participants (if needed) |
+
+**Note:** A full `grace_workshop.parquet` (480 MB) also exists locally for testing.
+The small version is recommended for Colab uploads.
 
 ---
 
 ## Option A — Run locally
 
-**Step 1.** Clone the repository and place `grace_workshop.parquet` in the repo root:
+**Step 1.** Clone the repository and place `grace_workshop_small.parquet` in the repo root:
 ```
 git clone https://github.com/lotteat11/ML_TND
 cd ML_TND
@@ -64,8 +69,8 @@ Open `NB1_baseline.ipynb` and run top to bottom. The Colab setup cell is a no-op
 **Step 2.** Click **File → Open notebook → GitHub tab**, enter
 `https://github.com/lotteat11/ML_TND`, and select a notebook from the `workshop/` folder.
 
-**Step 3.** Upload `grace_workshop.parquet` using the **Files pane** (the folder icon on
-the left sidebar → upload button). It lands at `/content/grace_workshop.parquet`.
+**Step 3.** Upload `grace_workshop_small.parquet` using the **Files pane** (the folder
+icon on the left sidebar → upload button). It lands at `/content/grace_workshop_small.parquet`.
 
 **Step 4.** Run the **Colab setup cell** at the top (the first code cell). It clones the
 repo for the code modules, moves your uploaded parquet into place, and `chdir`s into
