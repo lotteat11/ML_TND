@@ -35,6 +35,7 @@ __pycache__/
 # Workshop — track the notebooks, model/scaler, and small parquet via Git LFS
 # (these override the broad *.ipynb / *.json / *.joblib / *.parquet rules above).
 # The full grace_workshop.parquet stays ignored (local dev only).
+!workshop/NB0_setup.ipynb
 !workshop/*.ipynb
 !workshop/nb3_model_cyclic.json
 !workshop/nb3_scaler_cyclic.joblib
