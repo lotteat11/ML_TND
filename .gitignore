@@ -1,0 +1,44 @@
+# Virtual environments
+ven_2404/
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Data files (large, not version-controlled)
+*.parquet
+*.nc
+*.hdf5
+*.h5
+
+# Raw input datasets (downloaded, not version-controlled)
+GRACE_0217_v02/
+ionex_files_0917_v4/
+
+# Run / tuning outputs
+runs_*/
+tuning_*/
+
+# Pipeline logs
+*.log
+
+# Model outputs
+*.joblib
+*.json
+*.pkl
+*.csv
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store

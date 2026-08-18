@@ -2,43 +2,101 @@
 # Aalborg University
 """
 check_lst.py
-- Loads and engineers features, runs the cyclic time-block split,
-  and prints LST coverage statistics for each split.
-  Run this instead of the full train.py pipeline when diagnosing splits.
+- Loads the new full-mission article dataset with the same feature settings as
+  the model, runs the cyclic time-block split, and reports coverage for LST,
+  F10.7, and Ap.
+- Exports both the complete min--max range and the descriptive P5--P95 interval;
+  no distribution tails are removed.
+
+Example
+-------
+    ven_2404/bin/python CoreModel/check_lst.py --no-plot
 """
 
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import argparse
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
 
-import feature_functions as ff
-from train import load_and_engineer
-from config import PARQUET_FILE, FEATURES, TARGET
+VARIABLES = {
+    "Local solar time (h)": "lst_h",
+    "F10.7 (sfu)": "f107",
+    "Ap (3-h lag)": "ap_m3h",
+}
 
 
-def print_stats(name: str, df: pd.DataFrame) -> None:
-    h = df["lst_h"]
-    p5, p25, p75, p95 = h.quantile([0.05, 0.25, 0.75, 0.95]).values
-    std = h.std()
-    uniform_std = 24 / (2 * np.sqrt(3))  # std of uniform U(0,24) ≈ 6.93
-    coverage = std / uniform_std * 100
-
-    f107_5, f107_95 = df["f107"].quantile([0.05, 0.95]).values
-    ap_5,   ap_95   = df["ap_m3h"].quantile([0.05, 0.95]).values
-
-    print(
-        f"{name:>6}  n={len(df):>8,}  "
-        f"LST 5–95th: [{p5:4.1f}–{p95:4.1f}] h  "
-        f"IQR: [{p25:4.1f}–{p75:4.1f}] h  "
-        f"std={std:.2f} h ({coverage:.0f}% of uniform)  |  "
-        f"F10.7 5–95th: [{f107_5:.1f}–{f107_95:.1f}]  "
-        f"Ap 5–95th: [{ap_5:.1f}–{ap_95:.1f}]"
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Report full and central-90% coverage for the article dataset splits."
     )
+    parser.add_argument(
+        "--input", type=Path,
+        default=Path(__file__).resolve().parent.parent / "grace_data_merged_v5_full.parquet",
+        help="Merged model dataset (default: new full-mission v5 dataset).",
+    )
+    parser.add_argument("--start", default="2002-01-01", help="Exclusive model-period start.")
+    parser.add_argument("--end", default="2016-01-01", help="Exclusive model-period end.")
+    parser.add_argument(
+        "--exclude", default="2009-01-01,2009-06-06",
+        help="Interior holdout(s), as start,end pairs separated by semicolons.",
+    )
+    parser.add_argument(
+        "--tec-lag-mode", choices=("time", "rows"), default="time",
+        help="TEC lag construction used by the model.",
+    )
+    parser.add_argument(
+        "--ap-history", choices=("0", "1", "full"), default="1",
+        help="Ap-history feature configuration used by the model.",
+    )
+    parser.add_argument(
+        "--output-dir", type=Path, default=Path.cwd(),
+        help="Directory for dataset_coverage.csv and dataset_coverage.tex.",
+    )
+    parser.add_argument("--no-plot", action="store_true", help="Do not create the KDE plot.")
+    return parser.parse_args()
+
+
+def coverage_table(splits: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Build Table 2 statistics without excluding either distribution tail."""
+    rows = []
+    for variable, column in VARIABLES.items():
+        for split, df in splits.items():
+            values = df[column].dropna()
+            p5, p95 = values.quantile([0.05, 0.95]).values
+            rows.append({
+                "Variable": variable,
+                "Split": split.title(),
+                "N": len(values),
+                "Full range (min–max)": f"{values.min():.1f}–{values.max():.1f}",
+                "Central 90% (P5–P95)": f"{p5:.1f}–{p95:.1f}",
+            })
+    return pd.DataFrame(rows)
+
+
+def save_coverage_table(table: pd.DataFrame, output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / "dataset_coverage.csv"
+    tex_path = output_dir / "dataset_coverage.tex"
+    table.to_csv(csv_path, index=False)
+    caption = (
+        "Coverage of selected variables across dataset splits. The central 90\\% "
+        "interval is descriptive only; all samples in the full range, including "
+        "the lower and upper 5\\% tails, were retained."
+    )
+    table.to_latex(
+        tex_path, index=False, escape=False, caption=caption,
+        label="tab:dataset_coverage",
+    )
+    print(table.to_string(index=False))
+    print(f"\nSaved: {csv_path}")
+    print(f"Saved: {tex_path}")
 
 
 def plot_distributions(splits: dict) -> None:
@@ -67,8 +125,32 @@ def plot_distributions(splits: dict) -> None:
 
 
 if __name__ == "__main__":
-    print(f"Loading {PARQUET_FILE} ...")
-    df = load_and_engineer(PARQUET_FILE)
+    args = parse_args()
+    input_path = args.input.expanduser().resolve()
+    if not input_path.is_file():
+        raise FileNotFoundError(input_path)
+
+    # Set the article configuration before importing config/train: both modules
+    # resolve these environment variables at import time.
+    os.environ["TRAIN_PARQUET_FILE"] = str(input_path)
+    os.environ["TRAIN_TIME_MIN"] = args.start
+    os.environ["TRAIN_TIME_MAX"] = args.end
+    os.environ["TRAIN_TIME_EXCLUDE"] = args.exclude
+    os.environ["TEC_LAG_MODE"] = args.tec_lag_mode
+    os.environ["AP_HISTORY"] = args.ap_history
+
+    import feature_functions as ff
+    from config import FEATURES, TARGET
+    from train import load_and_engineer
+
+    print("Article dataset configuration:")
+    print(f"  input:       {input_path}")
+    print(f"  period:      {args.start} < time < {args.end}")
+    print(f"  holdout:     {args.exclude or 'none'}")
+    print(f"  TEC lags:    {args.tec_lag_mode}")
+    print(f"  Ap history:  {args.ap_history}")
+    print(f"\nLoading {input_path} ...")
+    df = load_and_engineer(input_path)
 
     X = df[FEATURES]
     y = df[[TARGET]]
@@ -76,7 +158,7 @@ if __name__ == "__main__":
     _, _, _, _, _, _, idx_train, idx_val, idx_test = ff.timeblock_split_repeated(
         X, y,
         fractions=(2/3, 1/6, 1/6),
-        n_cycles=8,
+        n_cycles=16,
         gap_before_val=1100,
         gap_before_test=1100,
         order=("train", "test", "val"),
@@ -89,8 +171,9 @@ if __name__ == "__main__":
         "TEST":  df.loc[idx_test],
     }
 
-    print("\nSplit diagnostics:")
-    for name, sub in splits.items():
-        print_stats(name, sub)
+    print("\nSplit diagnostics (all tails retained):")
+    table = coverage_table(splits)
+    save_coverage_table(table, args.output_dir)
 
-    plot_distributions(splits)
+    if not args.no_plot:
+        plot_distributions(splits)

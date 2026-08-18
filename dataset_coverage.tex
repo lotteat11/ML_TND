@@ -1,0 +1,19 @@
+\begin{table}
+\caption{Coverage of selected variables across dataset splits. The central 90\% interval is descriptive only; all samples in the full range, including the lower and upper 5\% tails, were retained.}
+\label{tab:dataset_coverage}
+\begin{tabular}{llrll}
+\toprule
+Variable & Split & N & Full range (min–max) & Central 90% (P5–P95) \\
+\midrule
+Local solar time (h) & Train & 48869045 & 0.0–24.0 & 1.5–22.5 \\
+Local solar time (h) & Val & 12217257 & 0.0–24.0 & 1.3–22.4 \\
+Local solar time (h) & Test & 12217242 & 0.0–24.0 & 1.9–22.4 \\
+F10.7 (sfu) & Train & 48869045 & 64.6–302.0 & 67.9–168.6 \\
+F10.7 (sfu) & Val & 12217257 & 66.2–298.3 & 67.6–173.4 \\
+F10.7 (sfu) & Test & 12217242 & 64.8–262.0 & 66.5–161.5 \\
+Ap (3-h lag) & Train & 48869045 & 0.0–300.0 & 0.0–32.0 \\
+Ap (3-h lag) & Val & 12217257 & 0.0–400.0 & 0.0–32.0 \\
+Ap (3-h lag) & Test & 12217242 & 0.0–236.0 & 0.0–32.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
