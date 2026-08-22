@@ -22,10 +22,15 @@ __pycache__/
 # Raw input datasets (downloaded, not version-controlled)
 GRACE_0217_v02/
 ionex_files_0917_v4/
+SWARM_1516_v02/
 
 # Run / tuning outputs
 runs_*/
 tuning_*/
+lookback_*/
+tec_lag_*/
+offtrack_*/
+archive_sweep_summaries/
 
 # Pipeline logs
 *.log

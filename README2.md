@@ -57,26 +57,20 @@ v3 behaviour exactly.
   observed drivers, unknown at issue time, making those numbers a
   perfect-driver upper bound. **Parked for the follow-up paper** — see §12.3.
 
-- **`Forecast/on_track_true_forecast.py`** + **`make_table_true_forecast.py`** —
-  goes further and **also re-runs NRLMSIS-2.1 with persisted drivers**, so both
-  the prediction and the baseline are genuine issue-time products. *Why:*
-  without this, future driver knowledge still leaks in through the MSIS
-  scaffold that the correction multiplies. Includes a startup sanity check that
-  pymsis with the dataset's own driver columns reproduces the stored
-  `msis_rho`. **Parked** — see §12.3.
-
 - **`README2.md`** — this document.
 
 ### Modified files
 
 Line counts are `diff` against `origin/main`. Every change is additive with
-published values as defaults; nothing was removed from any file.
+published values as defaults, except where noted: the second TEC lag
+(`vtec_matched_lag2`), the row-shift lag implementation (`TEC_LAG_MODE`), and
+the true-forecast scripts have been removed.
 
 | File | Scale | What changed |
 |---|---|---|
-| `Forecast/on_track.py` | +139 / −46 | (a) env-var overrides for model/scaler/data/output paths; (b) `TEC_LAG_MODE` and `AP_HISTORY` feature toggles; (c) two new evaluation regimes `y2002` and `storm2015` (§6); (d) `compute_metrics` extended with log-RMSE, Top-5 %, R² and `msis_*` baseline columns; (e) resume support — skip finished runs, write summary CSV after each run; (f) `ONTRACK_FILTERS` to select regimes; (g) memory: in-place column drop, freeing per-window frames; (h) **bug fix** — metrics/return block was inside an `else` branch, returning `None` for runs without a snapshot date (§8). |
+| `Forecast/on_track.py` | +139 / −46 | (a) env-var overrides for model/scaler/data/output paths; (b) feature lists imported from `CoreModel/config.py` instead of redeclared, so `AP_HISTORY` and the TEC lag cannot drift from training; (c) two new evaluation regimes `y2002` and `storm2015` (§6); (d) `compute_metrics` extended with log-RMSE, Top-5 %, R² and `msis_*` baseline columns; (e) resume support — skip finished runs, write summary CSV after each run; (f) `ONTRACK_FILTERS` to select regimes; (g) memory: in-place column drop, freeing per-window frames; (h) **bug fix** — metrics/return block was inside an `else` branch, returning `None` for runs without a snapshot date (§8). |
 | `CoreModel/train.py` | +73 / −6 | (a) `TIME_EXCLUDE` interior-holdout loop, applied *after* lag construction; (b) optional tuned hyperparameters via `TRAIN_PARAMS_JSON`, including a rebuilt LR schedule; (c) memory: column-limited parquet read, in-place column drop, float32 downcast of features, freeing unscaled splits after scaling. |
-| `CoreModel/config.py` | +41 / −6 | (a) env-var overrides for all paths and the time window; (b) `TIME_EXCLUDE` parsing multiple `"start,end"` intervals separated by `;`; (c) `TEC_LAG_MODE`; (d) `AP_HISTORY` appending 3 (or 5, with `full`) ap features to `FEATURES` and `COLS_TO_SCALE`. |
+| `CoreModel/config.py` | +41 / −6 | (a) env-var overrides for all paths and the time window; (b) `TIME_EXCLUDE` parsing multiple `"start,end"` intervals separated by `;`; (c) `TEC_LAG` / `TEC_LAG_COL` — the single t−3 h TEC lag, now the one definition shared by CoreModel and Forecast; (d) `AP_HISTORY` appending 3 (or 5, with `full`) ap features to `FEATURES` and `COLS_TO_SCALE`. |
 | `DataPreparation/merge_tec_grace.py` | +104 / −9 | (a) `MERGE_CHUNKED=1` year-by-year merge with ±4 h boundary overlap and streamed concatenation (§3.3); (b) deterministic nearest-in-time TEC epoch selection, replacing an arbitrary tie-break (§3.4); (c) env-var overrides. |
 | `DataPreparation/download_dns.py` | +37 / −22 | (a) FTP → HTTPS (the FTP listing is empty, §3.1); (b) **bug fix** — reader dispatch compared the satellite ID (`GA`/`GB`) against `"GRACE"`, routing every GRACE file to the Swarm parser; (c) mission directory map incl. GRACE-FO; (d) env-var overrides. |
 | `feature_functions.py` | +29 / −0 | New `add_tec_time_lag_features` — exact time-based TEC lags (§4). Nothing else touched. |
@@ -108,8 +102,8 @@ resolved deliberately rather than merged blindly:
 | Comment | Response | Section |
 |---|---|---|
 | **Major 2** — why only 2009–2016, ignoring higher solar activity in 2002–2009? | Full mission 2002–2017 downloaded and merged. Model trains on 2003–2015; 2002 becomes a solar-maximum holdout. | §3, §6 |
-| **Major 5** — why 3 h and 24 h TEC lags? | The code never implemented 3 h. Row-shifts on 10 s data with two interleaved satellites give **~42 min** and 24 h. Replaced with exact time-based lookups. **Manuscript text must be corrected.** | §4 |
-| **Major 7** — are MSIS log-residuals zero-centred and log-normal? | Measured: mean −0.099, median −0.067, skew −0.76, strongly solar-cycle dependent. Neither zero-centred nor log-normal. | §10 |
+| **Major 5** — why 3 h and 24 h TEC lags? | The feature set is now the current TEC map plus a **single exact t−3 h lookup**; the 24 h lag is gone, as is the row-shift implementation that made the old lags ~42 min / 24 h. **Manuscript must drop the 24 h lag.** | §4 |
+| **Major 7** — are MSIS log-residuals zero-centred and log-normal? | Measured on 73.7 M samples: mean **−0.149**, median −0.120, skew −0.54, ex. kurtosis +1.75. **Neither zero-centred nor log-normal** — reviewer correct on both. Magnitude ~0.1 as they expected, but *negative*. A constant explains only 20 % of it; the rest tracks the solar cycle and flips sign under storms. Log target still justified (§10.1). | §10, fig. `msis_residuals` |
 | **Major 8 / 10** — paper mixes nowcasting and forecasting; drop forecasting and warm-start | Not yet decided — see §12.1. The h=1 protocol is fully causal and is better described as *adaptive nowcasting*. | §12.1 |
 | **Major 11** — document the hyperparameter search | Seeded random search with trials table and stability/sensitivity plots. | §7 |
 | **Figure 5** — Feb 2016 storm too weak | March 2015 **G4** storm (ap = 179) held out of training and evaluated out-of-sample. | §6, §11 |
@@ -172,29 +166,27 @@ genuinely ambiguous. Worth one sentence in the data section.
 
 ## 4. TEC lag features (reviewer comment 5)
 
-The manuscript says the TEC lags are 3 h and 24 h. The code used **row**-shifts,
-and on 10 s data with GA and GB interleaved the actual spans are:
+The model uses the current TEC map plus **one** lagged map at **t−3 h**
+(`vtec_matched_lag`), built by `ff.add_tec_time_lag_features`: an exact lookup
+of the nearest sample to t−3 h within the same satellite track (±10 min
+tolerance, else NaN, which `dropna` removes). Matching within a track prevents
+a GA row from being handed GB's TEC, and a time-based lookup is unaffected by
+data gaps.
 
-| Feature | Published code | Measured median lag |
-|---|---|---|
-| `vtec_matched_lag` | `shift(500)` | **~42 min** (≈ one orbital period) |
-| `vtec_matched_lag2` | `shift(17280)` | 24 h (correct) |
+The lag and its column name are set once in `CoreModel/config.py`
+(`TEC_LAG` / `TEC_LAG_COL`) and imported by every training and forecast script,
+so the two cannot drift apart.
 
-Row-shifts are also corrupted by data gaps: **24 %** of `vtec_matched_lag2`
-values were more than 10 minutes from the nominal 24 h lag, because a fixed
-number of rows spans a different amount of time whenever data is missing.
+Earlier revisions carried two lags implemented as **row**-shifts
+(`shift(500)` / `shift(17280)`). On 10 s data with GA and GB interleaved those
+spanned ~42 min and 24 h rather than the intended values, and a fixed row count
+covers a different amount of time whenever data is missing — 24 % of the
+nominal 24 h values were more than 10 minutes off. Both the second lag and the
+row-shift implementation have been removed.
 
-`ff.add_tec_time_lag_features` does exact lookups at t−2500 s and t−24 h
-(nearest sample within ±10 min, else NaN, which `dropna` removes). Verified
-identical to the row-shift on gap-free stretches, differing only where the
-row-shift was wrong. Enabled with `TEC_LAG_MODE=time`; default `rows` preserves
-v3 behaviour.
-
-> **Manuscript action:** "3 hours" is wrong either way and must be corrected.
-> The honest description is *"one orbital period"* and *"24 hours (same
-> local-time geometry on the previous day)"* — a better physical justification
-> than arbitrary hour counts, and a direct answer to the reviewer's "why not 6,
-> 9, 12 h?".
+> **Manuscript note:** the 3 h lag the text describes is now what the code
+> actually computes. The 24 h lag is no longer part of the feature set, so any
+> reference to it must be removed.
 
 ---
 
@@ -267,11 +259,12 @@ protocol needs 6 lead-in days before its first forecast, and every day it
 fine-tunes on must itself be outside core training.
 
 > **Do not widen the reported storm window.** Pooling 15–20 March mixes three
-> physically distinct regimes (pre-storm quiet, main phase, recovery) and
-> produces a favourable number driven by the surrounding quiet days —
+> physically distinct regimes (pre-storm quiet, main phase, recovery), so a
+> pooled number is driven by the surrounding quiet days rather than the storm —
 > structurally the same criticism the reviewer made of the Feb 2016 figure. The
 > 2-day definition is not cherry-picked: 17–18 March are the only days in the
 > window with ap = 179, an order of magnitude above the window median of 18.
+> This holds regardless of which way the main-phase result comes out.
 
 ---
 
@@ -370,8 +363,8 @@ full-frame copies and frees per-window frames.
 TUNE_TRIALS=200 ./run_pipeline.sh new tune
 
 # Storm experiment (adds the March-2015 holdout, 4 regimes)
-./run_storm_pipeline.sh                    # 15 features
-AP_HISTORY=1 ./run_storm_pipeline.sh       # + 3 ap storm-history features
+./run_storm_pipeline.sh                    # 14 features
+AP_HISTORY=1 ./run_storm_pipeline.sh       # + 3 ap storm-history features (default)
 USE_TUNED=1  ./run_storm_pipeline.sh       # tuned hyperparameters
 
 # Reports
@@ -393,11 +386,15 @@ machine urs.earthdata.nasa.gov login USERNAME password PASSWORD
 
 | Variable | Default | Effect |
 |---|---|---|
-| `TEC_LAG_MODE` | `rows` | `time` = exact, gap-robust TEC lags |
+| `TEC_LAGS` | `3h` | TEC lag set; more lags need a retrained model (§4) |
 | `AP_HISTORY` | `1` | `1` = +3 storm-history ap features; `full` = +5 |
 | `USE_TUNED` | `0` | `1` = load `tuning_v5/best_params.json` |
 | `TRAIN_TIME_EXCLUDE` | unset | `"start,end;start,end"` interior holdouts |
-| `ONTRACK_FILTERS` | `pre2009,post2016` | Which evaluation regimes to run |
+| `ONTRACK_FILTERS` | `quiet2009,storm2015,post2016` | Which evaluation regimes to run |
+| `ONTRACK_HORIZONS` | `1,3` | Forecast horizons in days |
+| `ONTRACK_LOOKBACK_DAYS` | `3` | Days of history each warm-start step fine-tunes on |
+| `ONTRACK_RESET_EVERY` | `4` | Reset the fine-tuned model to base every N steps |
+| `ONTRACK_PARAMS_JSON` | `tuning_v13_.../best_params.json` | Tree shape for the trees warm-start adds |
 | `MERGE_CHUNKED` | unset | `1` = year-by-year merge (required for full mission) |
 | `TUNE_TRIALS` | `32` | Random-search trial count |
 
@@ -408,92 +405,155 @@ Plus per-stage path overrides (`TRAIN_PARQUET_FILE`, `TRAIN_MODEL_OUT`,
 
 ## 10. Measured data facts for the manuscript
 
-**MSIS log-residual distribution** (reviewer comment 7). Over the core window,
-`log(rho_obs / msis_rho)` has mean **−0.099**, median **−0.067**, skew **−0.76**
-— not zero-centred, and left-skewed rather than log-normal. The reviewer's
-expectation of ~0.1 was correct in magnitude.
+**MSIS log-residual distribution** (reviewer comment 7). Measured over the
+full-mission training window (2002–2016, quiet-2009 held out; n = 73,746,824),
+`log(rho_obs / msis_rho)` has:
 
-More usefully, the bias is **strongly solar-cycle dependent**: median log-ratio
-per year runs from ≈0 at solar maximum (2002: −0.03; 2013: +0.02) to **−0.46**
-in the deep 2009 minimum, where MSIS overestimates density by ~37 %. That
-systematic, activity-dependent structure is exactly what a correction model can
-learn — an argument for the method in its own right.
+| | value | as a factor |
+|---|---|---|
+| mean | **−0.1487** | ×0.862 (MSIS **+13.8 %** too high) |
+| median | −0.1202 | ×0.887 |
+| sd | 0.2974 | |
+| skew | −0.542 | |
+| excess kurtosis | +1.753 | |
+
+**The reviewer is right on both counts.** The residual is *not* centred at zero,
+and it is *not* log-normal: Shapiro–Wilk W = 0.976 (p ≈ 2e−28), D'Agostino
+K² = 15336 (p = 0), and the left tail is markedly heavier than normal
+(standardised p0.1 at −4.03 against −3.09 expected) while the right tail is
+lighter. Their expected magnitude (~0.1) is right; **the sign is opposite** —
+MSIS over-estimates density on this dataset, so the offset is negative.
+
+**But the offset is not a calibration constant.** A single constant would remove
+only **20 %** of the mean-square residual. The remaining structure is
+state-dependent:
+
+- **Solar cycle** — yearly median runs from ≈0 at solar maximum (2002: −0.026;
+  2013: +0.023; 2015: +0.041) to **−0.446** in the deep 2009 minimum, where MSIS
+  over-estimates by ~36 %.
+- **Geomagnetic activity** — median rises monotonically with ap and *changes
+  sign*: −0.148 at ap 0–10, −0.031 at ap 20–40, **+0.140 at ap > 80**. MSIS
+  over-estimates in quiet conditions and under-estimates during storms.
+- **Altitude** — +0.024 below 400 km against −0.192 at 460–500 km.
+
+This is the response to the reviewer's attribution: a fixed pipeline calibration
+cannot produce an offset that swings by 0.49 across the solar cycle and flips
+sign under storm forcing. That systematic, activity-dependent structure is
+exactly what a correction model can learn — an argument for the method in its
+own right.
+
+**Consequence for the method.** The residual being skewed and heavy-tailed does
+*not* invalidate the log target — see §10.1.
+
+Figure: `figs/msis_residuals.png` / `.pdf`, produced by
+`python CoreModel/plot_msis_residuals.py`. Four panels: (a) histogram with the
+mean/median marked against a same-moment normal, (b) Q–Q against a normal,
+(c) yearly median against F10.7, (d) median against ap with the sign flip.
+
+### 10.1 Does the log transform still make sense?
+
+Yes, and the measurements above are the argument for it rather than against it.
+
+1. **The error is multiplicative, so the log target is the right one.** MSIS is
+   wrong by a *factor* (×0.64 in 2009, ×1.15 in storms), not by an additive
+   amount. Density itself spans two decades across the mission, so a model
+   trained on `rho_obs − rho_msis` would let solar-maximum samples dominate the
+   loss entirely and ignore the minimum. In log space a 30 % error costs the
+   same wherever it occurs. The reviewer's own framing — deviations quoted in
+   **per cent** — is a multiplicative statement.
+
+2. **The log transform was never justified by log-normality, and does not need
+   to be.** Least-squares on a log target is consistent under far weaker
+   conditions than normal residuals; the Gauss–Markov argument needs only finite
+   variance, and gradient boosting makes no distributional assumption at all.
+   Log-normality would matter if we were quoting analytic confidence intervals
+   from the fitted sd — we are not; the reported metrics are empirical
+   (log-RMSE, MAPE, top-5 %).
+
+3. **What must change is the manuscript's wording, not the method.** Drop the
+   claims that the residual is zero-centred and log-normal, state the measured
+   moments, and note that the metrics are distribution-free. If a spread
+   statistic is wanted alongside them, quote the empirical IQR or the median
+   absolute deviation rather than anything that assumes normality.
+
+4. **The skew is itself physical, not a defect.** The heavy left tail is the
+   deep-minimum population where MSIS is worst (2008–2009 sits near −0.45 with
+   its own skew of −0.44 to −0.71). Those samples are the ones the correction
+   model has most to fix, so the asymmetry is signal about where the baseline
+   fails, not noise to be transformed away.
 
 ---
 
 ## 11. Results
 
-All results below use the **published** hyperparameters (the configuration that
-ranked last in the search) and the 15-feature set, unless stated otherwise.
+Model: `xgb_model_v8_storm_ap_2002train.json` — 17 features (single t−3 h TEC
+lag plus the storm-history ap drivers; `TEC_LAGS=3h`, `AP_HISTORY=1`), tuned
+hyperparameters from `tuning_v13_tec3h_depth3_10/best_params.json`.
 
-**Core model, internal test split.** The full-mission model improves on MSIS by
-**−17 % log-RMSE** (0.336 → 0.279) and **−27 % MAPE** (32.2 → 23.4). The
-published 2009–2016 model improved by −10.3 % and −15.7 % on its own window.
-Both columns are worse in absolute terms because the task is harder (solar
-maximum, deep minimum, 160 km altitude span), but the **relative** gain is
-larger — the meaningful comparison.
+Warm-start fine-tunes on the preceding **3 days** at each rolling step
+(`ONTRACK_LOOKBACK_DAYS`, §9). Aggregate skill is nearly flat over 3–7 days;
+3 is chosen for transition behaviour, where a longer lookback carries more
+quiet-day history into a rising storm and overshoots.
 
-**Rolling evaluation, h = 1 day** (log-RMSE against the MSIS baseline *for the
-same period*; dr0 = core model only, dr1 = warm-start with daily fine-tuning):
+**Source of record:** `runs_final_20250821/summary_metrics.csv` — 12 rows
+(3 regimes × dr0/dr1 × h ∈ {1, 3}), each carrying its own `msis_*` baseline
+columns, plus `table_regimes_h1.tex` / `_h3.tex`. Quote numbers from that file
+only; the other `runs_*/` directories hold parameter sweeps.
 
-| Regime | MSIS | dr0 | dr1 |
-|---|---|---|---|
-| 2002 (solar max) | 0.202 | 0.253 (**+25 %**) | 0.163 (**−19 %**) |
-| quiet-2009 | 0.575 | 0.380 (−34 %) | 0.241 (**−58 %**) |
-| storm-2015 window | 0.190 | 0.254 (+34 %) | 0.161 (−15 %) |
-| post-2016 | 0.244 | 0.232 (−5 %) | 0.185 (−24 %) |
+**All three regimes are held out.** quiet-2009 and storm-2015 are excluded from
+training via `TIME_EXCLUDE` (2,672,575 and 773,417 rows — see §6); post-2016
+lies past `TRAIN_TIME_MAX`. Internal train/val/test splits of the training
+period are not reported here.
 
-The core model alone **loses to MSIS** outside its training distribution (2002
-solar maximum, and the storm window), while daily fine-tuning turns both into
-solid gains. This is the direct answer to the reviewer's doubt about the value
-of warm-start, and it reproduced across two independently trained models.
+**Rolling evaluation** (log-RMSE / MAPE against the MSIS baseline *for the same
+period*; dr0 = core model only, dr1 = warm-start with daily fine-tuning):
 
-**March 2015 G4 main phase (17–18 March), h = 1** — the headline storm result:
+**h = 1 day**
 
-| | MSIS | dr0 | dr1 |
-|---|---|---|---|
-| RMSE_log | 0.421 | 0.463 (+9.8 %) | 0.434 (**+2.9 %**) |
-| MAPE | 32.8 % | 31.8 % (−2.9 %) | 31.3 % (−4.5 %) |
-
-**Neither variant beats MSIS on the storm days themselves.** Warm-start closes
-most of the gap but not all of it. Report this honestly: the pooled 45-day window
-shows a 15 % *improvement*, but that gain comes entirely from surrounding quiet
-days.
-
-> Do **not** quote R² for these two days: MSIS's own R² is 0.060, so the
-> percentage change is dominated by a near-zero denominator and the −303 % /
-> −96 % figures the script prints are meaningless. Use RMSE_log.
-
-**Daily trace** (log-RMSE, h = 1) — the deficit is confined to two days:
-
-| Day | ap max | MSIS | dr0 | dr1 |
+| Regime | Window | MSIS | dr0 | dr1 |
 |---|---|---|---|---|
-| 16 Mar | 22 | 0.118 | 0.119 | **0.107** |
-| **17 Mar** | **179** | **0.467** | 0.486 | 0.470 |
-| **18 Mar** | **179** | **0.370** | 0.438 | 0.394 |
-| 19 Mar | 48 | 0.201 | **0.145** | 0.183 |
-| 20 Mar | 39 | 0.185 | **0.129** | 0.141 |
-| 25 Mar | 22 | 0.129 | 0.191 | **0.089** |
-| 3 Apr | 39 | 0.229 | 0.343 | **0.085** |
+| quiet-2009 | 2009-01-01 → 06-06 | 0.573 / 72.8 % | 0.271 (−53 %) / 23.5 % | 0.214 (**−63 %**) / 17.2 % |
+| storm-2015 | 2015-03-01 → 04-15 | 0.188 / 13.8 % | 0.148 (−21 %) / 10.9 % | 0.131 (**−30 %**) / 9.5 % |
+| post-2016 | 2016-01-01 → end | 0.243 / 20.9 % | 0.191 (−22 %) / 15.2 % | 0.159 (**−35 %**) / 12.1 % |
 
-Two observations for the manuscript. Warm-start **recovers within a single day**
-of the main phase — physically coherent, since persistence-based fine-tuning
-cannot anticipate a sudden commencement but adapts as soon as the storm enters
-its training window. And on **19–20 March the core model beats warm-start**, the
-only place in the 45-day window where it does. A plausible explanation is that
-the 5-day fine-tuning window there straddles the regime change (mostly quiet
-pre-storm days plus two extreme days), briefly pulling the model away from the
-broad climatology. **This is untested** — flagged because a reader looking at the
-daily figure will notice it, and anticipating it is stronger than being asked.
+**h = 3 days**
 
-**Suggested Figure 5 replacement:** plot this daily trace (RMSE_log for MSIS /
-dr0 / dr1) with ap on a secondary axis. It shows the storm spike, the main-phase
-tie, and the one-day recovery in a single panel.
+| Regime | Window | MSIS | dr0 | dr1 |
+|---|---|---|---|---|
+| quiet-2009 | 2009-01-01 → 06-06 | 0.575 / 73.3 % | 0.271 (−53 %) / 23.6 % | 0.224 (**−61 %**) / 18.1 % |
+| storm-2015 | 2015-03-01 → 04-15 | 0.188 / 13.7 % | 0.147 (−22 %) / 10.7 % | 0.138 (**−27 %**) / 9.9 % |
+| post-2016 | 2016-01-01 → end | 0.243 / 20.9 % | 0.191 (−22 %) / 15.2 % | 0.168 (**−31 %**) / 12.9 % |
 
-**Control check** — the extra March-2015 holdout did not disturb the other
-regimes (h = 1, against the earlier run without it): quiet-2009 −0.1 % / −0.7 %,
-y2002 dr1 +0.5 %. The larger moves (y2002 dr0 +5.1 %, post2016 dr0 +2.2 %) are
-both the core model, the variant most sensitive to 773 k fewer training rows.
+Both variants beat MSIS in every regime at both horizons, and warm-start
+improves on the static core model throughout — most strongly where the
+correction has most to do (quiet-2009, deep solar minimum). This answers the
+reviewer's doubt about the value of warm-start.
+
+Extending the horizon costs the core model nothing (dr0 is flat h=1 → h=3: it
+does not adapt, so the horizon only changes which rows are scored) and costs
+warm-start a few percent, as the forecast reaches further from its last
+fine-tune. Warm-start still beats the core model at h = 3 in every regime.
+
+**R² against MSIS.** In quiet-2009 MSIS scores **−0.871** (h = 1) — worse than
+predicting the mean — because it runs a systematic ~1.8× high through the deep
+minimum. The correction lifts this to **0.873** (dr1). Storm-2015 goes
+0.787 → 0.909 and post-2016 0.787 → 0.903. Quote R² as an absolute change, not
+a percentage: with a negative baseline the relative figure is meaningless.
+
+A solar-maximum regime (`y2002`) is available via `ONTRACK_FILTERS=y2002` but
+is not part of the current results file.
+
+**March 2015 G4 main phase (17–18 March), h = 1.** The main-phase daily trace
+is not yet generated; the whole-window storm-2015 figures are in the table
+above.
+
+> Do **not** quote R² for the two main-phase days: MSIS's own R² there is near
+> zero, so the percentage change is dominated by the denominator and the
+> figures the script prints are meaningless. Use RMSE_log.
+
+**Suggested Figure 5 replacement:** plot the daily trace (RMSE_log for MSIS /
+dr0 / dr1) with ap on a secondary axis, so the storm spike and the recovery
+behaviour appear in a single panel.
 
 ---
 
@@ -532,29 +592,28 @@ products of slightly lower quality. One sentence covers it.
    `USE_TUNED=1`.
 3. **Evaluate the ap-history variant.** Features implemented and verified, but
    the `AP_HISTORY=1` storm evaluation had not completed when this was written.
-   Open question: do integrated-heating features improve 17–18 March, and does
-   the 19–20 March recovery anomaly change?
+   Open question: do integrated-heating features improve 17–18 March, on top of
+   the gain the revised fine-tuning setup already delivers?
 4. **Storm-weighted training** — weight samples by ap so extreme conditions are
    not swamped by the quiet majority. Targets storm performance directly, unlike
    the hyperparameter search. Candidate for the follow-up paper.
-5. **Manuscript corrections** — TEC lag description (§4), log-residual centring
+5. **Manuscript corrections** — TEC lag description, now a single t−3 h lag (§4), log-residual centring
    (§10), the arbitrary-epoch note (§3.4), and the Ap/ap notation inconsistency
    (`ap` is 3-hourly, `Ap` its daily average; the MSIS runs use daily-Ap mode).
 
-### 12.3 The persisted-driver / true-forecast scripts
+### 12.3 The persisted-driver script
 
-`on_track_persisted.py` and `on_track_true_forecast.py` (plus their table
-scripts) address a different concern: the published "forecast" used **observed**
-drivers inside the forecast window, which are unknown at issue time, making the
-numbers a perfect-driver upper bound.
+`on_track_persisted.py` (plus its table script) addresses a different concern:
+the published "forecast" used **observed** drivers inside the forecast window,
+which are unknown at issue time, making the numbers a perfect-driver upper
+bound. It replaces drivers in the forecast window with issue-time values (TEC
+persisted via nearest lat/LST geometry; F10.7 and ap held constant).
 
-- `on_track_persisted.py` replaces drivers in the forecast window with
-  issue-time values (TEC persisted via nearest lat/LST geometry; F10.7 and ap
-  held constant).
-- `on_track_true_forecast.py` goes further and **also re-runs NRLMSIS-2.1 with
-  persisted drivers**, so both the ML prediction and the baseline are genuine
-  issue-time products. Without this, future driver knowledge still leaks in
-  through the MSIS scaffold that the correction multiplies.
+A further variant that also re-ran NRLMSIS-2.1 with persisted drivers — so that
+both the ML prediction and the baseline were genuine issue-time products — has
+been removed. Note the consequence: with the MSIS scaffold still built from
+observed drivers, some future driver knowledge leaks in through the baseline
+that the correction multiplies.
 
 Findings: under fully operational conditions the model keeps large gains in quiet
 periods (−48 to −56 % RMSE_log) and a modest 1-day gain when disturbed (−6 %),

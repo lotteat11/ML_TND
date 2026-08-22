@@ -10,8 +10,15 @@ off_track.py
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from typing import Tuple
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, "CoreModel"))
+from config import (FEATURES, COLS_TO_SCALE as _CFG_COLS_TO_SCALE,
+                    TEC_LAGS, TEC_LAG_COLS)
 
 import numpy as np
 import pandas as pd
@@ -31,42 +38,57 @@ import pymsis.utils
 # ------------------------------
 @dataclass
 class Config:
-    # Data inputs
-    grace_parquet: str = "grace_dns_with_tnd_y200916_v4_0809.parquet"
-    tec_parquet: str = "tec_codg_2009-2017_doy1-365.parquet"
+    # Data inputs. The published-setup files these once named (the 2009-2016
+    # GRACE/TND parquet and the 2009-2017 TEC parquet) are not in the repo;
+    # these are their full-mission successors.
+    grace_parquet: str = "grace_dns_with_tnd_y200217_v5.parquet"
+    tec_parquet: str = "tec_codg_2002-2017_doy1-365_v2.parquet"
 
-    # Model artefacts
-    model_file: str = "runs/dr1_post2016_h3/xgb_model_saved_dr1_post2016_h3_start_2016-02-18.json"
-    model_file_core: str = "xgb_model_updated.json"
-    scaler_x_file: str = "scaler_xgboost_X_v3.joblib"
-    scaler_y_file: str = "scaler_xgboost_y_v3.joblib"
+    # Model artefacts. model_file is the warm-start snapshot saved during the
+    # rolling run at selected_time_utc's date, so the off-track map uses the
+    # same fine-tuned model the on-track evaluation used that day; the scalers
+    # must be the ones that model was fitted with (17 features, TEC_LAGS=3h,
+    # AP_HISTORY=1 -- off_track imports the feature list from CoreModel/config).
+    # 2016-02-16 is the day shown in the on-track showcase figure, so the two
+    # figures depict the same epoch. 19 UTC falls in the disturbed part of that
+    # day (ap_m6h 56, MSIS 0.404 -> model 0.209 on-track, -48.4%) and has Swarm
+    # coverage from all three spacecraft over the full latitude range.
+    # The snapshot comes from runs_snapshot_20160216, a dr1_post2016_h1 rerun
+    # identical to runs_final_20250821 except for the snapshot date (see
+    # run_snapshot_20160216.sh). run_snapshot_20160307.sh makes the equivalent
+    # snapshot for 2016-03-07 00 UTC (ap 94, -74%), used in earlier drafts.
+    model_file: str = ("runs_snapshot_20160216/dr1_post2016_h1/"
+                       "xgb_model_saved_dr1_post2016_h1_start_2016-02-16.json")
+    model_file_core: str = "xgb_model_v8_storm_ap_2002train.json"
+    scaler_x_file: str = "scaler_xgboost_X_v8_storm_ap_2002train.joblib"
+    scaler_y_file: str = "scaler_xgboost_y_v8_storm_ap_2002train.joblib"
 
     # Time selection
-   # selected_time_utc: datetime = datetime(2016, 2, 16, 8, 0, 0, tzinfo=timezone.utc)
-    selected_time_utc: datetime = datetime(2016, 2, 18, 6, 0, 0, tzinfo=timezone.utc)
+    # Must be a date model_file has a snapshot for (see above).
+    selected_time_utc: datetime = datetime(2016, 2, 16, 19, 0, 0, tzinfo=timezone.utc)
 
 
 
-    # Grid resolution / ranges
+    # Grid resolution / ranges. Both stops are EXCLUSIVE — they are passed
+    # straight to np.arange — so the grid runs to lat_stop - lat_step and
+    # lon_stop - lon_step. Quote the realised extent, not these values:
+    # latitude -87.5 .. 89.9 (888 nodes), longitude -180.0 .. 179.91 (4000).
+    #
+    # lon_stop must not exceed 180.0. Longitude is cyclic, so a stop beyond
+    # +180 wraps onto longitudes the grid already covers and computes that
+    # strip twice: the previous 185.0 added 56 duplicate columns spanning
+    # 180.0 .. 184.95, i.e. a second copy of -180.0 .. -175.05.
     lat_start: float = -87.5
     lat_stop: float = 90.0
     lat_step: float = 0.2
     lon_start: float = -180.0
-    lon_stop: float = 185.0
+    lon_stop: float = 180.0
     lon_step: float = 0.09
 
     # Plotting
     plot_results: bool = True
 
 
-    ALT_FEATURE_ORDER = [
-        "f107a", "lat", "matched_tec_value",
-        "lon_cos", "lon_sin", "lst_sin",
-        "doy_sin", "doy_cos", "f107", "alt_km",
-        "ap_m3h", "ap_m6h",
-        "vtec_matched_lag", "vtec_matched_lag2",
-        "lst_lat_sin"
-    ]
 
 # ------------------------------
 # Data loading & preprocessing
@@ -169,6 +191,41 @@ def interpolate_tec_to_grid(df_tec: pd.DataFrame, lat_range: np.ndarray, lon_ran
 
     return interp_df
 
+
+def tec_map_at_time(df_tec: pd.DataFrame, target_time) -> pd.DataFrame:
+    """Return a TEC map at an exact time using linear temporal interpolation.
+
+    IONEX epochs are coarser than the 2,500-second model lag.  Interpolating
+    the bracketing maps gives a true t-lag field; shifting rows would instead
+    mean an unknown multiple of the map cadence.
+    """
+    target = pd.Timestamp(target_time)
+    if target.tzinfo is None:
+        target = target.tz_localize("UTC")
+    else:
+        target = target.tz_convert("UTC")
+
+    epochs = pd.DatetimeIndex(df_tec["epoch"].drop_duplicates().sort_values())
+    pos = int(epochs.searchsorted(target))
+    if pos < len(epochs) and epochs[pos] == target:
+        return df_tec.loc[df_tec["epoch"] == target,
+                          ["latitude", "longitude", "tec_value"]].copy()
+    if pos == 0 or pos == len(epochs):
+        raise ValueError(f"TEC data do not bracket requested time {target}")
+
+    before, after = epochs[pos - 1], epochs[pos]
+    weight = (target - before) / (after - before)
+    left = df_tec.loc[df_tec["epoch"] == before,
+                      ["latitude", "longitude", "tec_value"]].rename(
+                          columns={"tec_value": "tec_before"})
+    right = df_tec.loc[df_tec["epoch"] == after,
+                       ["latitude", "longitude", "tec_value"]].rename(
+                           columns={"tec_value": "tec_after"})
+    out = left.merge(right, on=["latitude", "longitude"], how="inner")
+    out["tec_value"] = out["tec_before"] + float(weight) * (
+        out["tec_after"] - out["tec_before"])
+    return out[["latitude", "longitude", "tec_value"]]
+
 # ------------------------------
 # TEC loading & merge
 # ------------------------------
@@ -176,26 +233,25 @@ def interpolate_tec_to_grid(df_tec: pd.DataFrame, lat_range: np.ndarray, lon_ran
 def load_tec_epoch_and_merge(grid_df: pd.DataFrame,
                              tec_parquet: str,
                              selected_time: datetime) -> pd.DataFrame:
-    """Load TEC parquet, add lag features (hard-coded), filter to selected epoch, and merge to grid."""
+    """Load the current and t-3h TEC maps and merge them onto the grid."""
     df_tec = pd.read_parquet(tec_parquet)
     df_tec['epoch'] = pd.to_datetime(df_tec['epoch'], utc=True)
-
-    # Hard-coded lag features as in the original script
-    df_tec['matched_tec_value'] = df_tec['tec_value']
-
     df_tec['latitude'] = df_tec['latitude'].astype(float)
     df_tec['longitude'] = df_tec['longitude'].astype(float)
 
-    df_tec = df_tec.sort_values(['latitude', 'longitude', 'epoch'])
-    df_tec['matched_tec_value'] = df_tec['tec_value']
-    df_tec['vtec_matched_lag']  = df_tec.groupby(['latitude', 'longitude'])['tec_value'].shift(1)
-    df_tec['vtec_matched_lag2'] = df_tec.groupby(['latitude', 'longitude'])['tec_value'].shift(24)
-
-    tec_epoch = df_tec[df_tec['epoch'] == pd.Timestamp(selected_time)]
+    targets = {"matched_tec_value": pd.Timestamp(selected_time)}
+    for lag, col in zip(TEC_LAGS, TEC_LAG_COLS):
+        targets[col] = pd.Timestamp(selected_time) - pd.Timedelta(lag)
+    tec_epoch = None
+    for name, target in targets.items():
+        one = tec_map_at_time(df_tec, target).rename(columns={"tec_value": name})
+        tec_epoch = one if tec_epoch is None else tec_epoch.merge(
+            one, on=["latitude", "longitude"], how="inner")
+    tec_epoch["tec_value"] = tec_epoch["matched_tec_value"]
 
     merged = grid_df.merge(
         tec_epoch[['latitude', 'longitude', 'tec_value', 'matched_tec_value',
-                   'vtec_matched_lag', 'vtec_matched_lag2']],
+                   *TEC_LAG_COLS]],
         on=['latitude', 'longitude'], how='left'
     )
     return merged
@@ -371,21 +427,9 @@ def scale_swarm_hour_to_alt(row: pd.DataFrame,
 # ------------------------------
 # Model inference
 # ------------------------------
-COLS_TO_SCALE = [
-    "f107", "ap_m6h", "lat", "f107a", "alt_km",
-    "matched_tec_value", "ap_m3h", "vtec_matched_lag", "vtec_matched_lag2"
-]
-
-FEATURE_ORDER = [
-    "f107a", "lat",
-    "matched_tec_value",
-    "lon_cos",
-    "lon_sin", "lst_sin", "ap_m3h",
-    "doy_sin", "doy_cos", "f107", "alt_km",
-    "ap_m6h",
-    "vtec_matched_lag", "vtec_matched_lag2",
-    'lst_lat_sin'
-]
+# Imported from CoreModel/config.py so training and inference cannot drift.
+COLS_TO_SCALE = list(_CFG_COLS_TO_SCALE)
+FEATURE_ORDER = list(FEATURES)
 
 
 def load_model_and_scalers(model_file: str, scaler_x_file: str, scaler_y_file: str):
@@ -1114,23 +1158,37 @@ def main(cfg: Config = Config()):
     # 3) Build global grid with features
     lat_range = np.arange(cfg.lat_start, cfg.lat_stop, cfg.lat_step)
     lon_range = np.arange(cfg.lon_start, cfg.lon_stop, cfg.lon_step)
+    # Longitude is cyclic: any node past +180 is a duplicate of one already in
+    # the grid, so the map would weight that strip twice.
+    if lon_range.size and lon_range.max() > 180.0:
+        raise ValueError(
+            f"lon grid reaches {lon_range.max():.2f}° > 180°: "
+            f"{(lon_range > 180.0).sum()} nodes duplicate longitudes already "
+            f"covered (they wrap to {lon_range.max() - 360.0:.2f}°). "
+            f"Set lon_stop <= 180.0 (np.arange's stop is exclusive)."
+        )
     grid_df = build_global_feature_grid(cfg.selected_time_utc, alt_km, lat_range, lon_range)
-    print(f"Global grid created with {len(grid_df)} points")
+    print(f"Global grid created with {len(grid_df)} points "
+          f"(lat {lat_range.min():.1f}..{lat_range.max():.1f}, "
+          f"lon {lon_range.min():.2f}..{lon_range.max():.2f})")
 
     # 4) Load TEC for epoch & merge to grid
     print("Merging TEC values for selected epoch ...")
 
-# Load TEC epoch data
+# Load TEC maps and evaluate each feature at its exact physical time.
     df_tec = pd.read_parquet(cfg.tec_parquet)
     df_tec['epoch'] = pd.to_datetime(df_tec['epoch'], utc=True)
-    tec_epoch = df_tec[df_tec['epoch'] == pd.Timestamp(cfg.selected_time_utc)]
-
-# Interpolate TEC to finer grid
-    interp_tec = interpolate_tec_to_grid(tec_epoch, lat_range, lon_range)
-
-    interp_tec['vtec_matched_lag'] = interp_tec['tec_value']  # placeholder or compute lag
-    interp_tec['vtec_matched_lag2'] = interp_tec['tec_value']  # placeholder or compute lag
-    interp_tec['matched_tec_value'] = interp_tec['tec_value']
+    target_times = {"matched_tec_value": pd.Timestamp(cfg.selected_time_utc)}
+    for lag, col in zip(TEC_LAGS, TEC_LAG_COLS):
+        target_times[col] = pd.Timestamp(cfg.selected_time_utc) - pd.Timedelta(lag)
+    interp_tec = None
+    for feature, target in target_times.items():
+        tec_map = tec_map_at_time(df_tec, target)
+        fine = interpolate_tec_to_grid(tec_map, lat_range, lon_range).rename(
+            columns={"tec_value": feature})
+        interp_tec = fine if interp_tec is None else interp_tec.merge(
+            fine, on=["latitude", "longitude"], how="inner")
+    interp_tec["tec_value"] = interp_tec["matched_tec_value"]
 
 # Merge interpolated TEC with grid
     grid_with_tec = grid_df.merge(interp_tec, on=['latitude', 'longitude'], how='left')
@@ -1277,10 +1335,8 @@ def main(cfg: Config = Config()):
     )
 
 # 7) Prepare features for the core model
-# Option A: use your existing helper (keeps FEATURE_ORDER & scaling aligned)
+# Uses prepare_feature_matrix so FEATURE_ORDER & scaling stay aligned.
     X_core = prepare_feature_matrix(grid_with_msis, core_scaler_X)
-
-# Option B: if you need an alternative order: X_core = grid_with_msis[ALT_FEATURE_ORDER]
 
 # 8) Predict using CORE (pre-forecast), composing rho_pred from msis_rho
     print("Predicting on grid using CORE model (pre-forecast baseline) ...")

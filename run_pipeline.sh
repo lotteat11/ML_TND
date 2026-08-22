@@ -36,6 +36,19 @@ STAGES=${2:-dns,tec,msis,merge,train,eval,ontrack}
 if [[ -x "ven_2404/bin/python" ]]; then PY=${PY:-ven_2404/bin/python}; else PY=${PY:-python3}; fi
 export MPLBACKEND=Agg   # scripts call plt.show(); keep batch runs headless
 
+# Snapshot the model/output names the caller supplied, before the per-mode
+# blocks below export their own defaults over them. The storm block consults
+# these so an explicit choice survives, e.g. a rerun against a retrained model:
+#   ONTRACK_OUTPUT_ROOT=runs_v13 ./run_pipeline.sh storm ontrack
+_ENV_TRAIN_MODEL_OUT="${TRAIN_MODEL_OUT:-}"
+_ENV_TRAIN_SCALER_X_OUT="${TRAIN_SCALER_X_OUT:-}"
+_ENV_TRAIN_SCALER_Y_OUT="${TRAIN_SCALER_Y_OUT:-}"
+_ENV_ONTRACK_MODEL_FILE="${ONTRACK_MODEL_FILE:-}"
+_ENV_ONTRACK_SCALER_X_FILE="${ONTRACK_SCALER_X_FILE:-}"
+_ENV_ONTRACK_SCALER_Y_FILE="${ONTRACK_SCALER_Y_FILE:-}"
+_ENV_ONTRACK_OUTPUT_ROOT="${ONTRACK_OUTPUT_ROOT:-}"
+_ENV_ONTRACK_FILTERS="${ONTRACK_FILTERS:-}"
+
 case "$MODE" in
   new|storm)
     # ---- data: full mission 2002-2017 ----
@@ -60,7 +73,7 @@ case "$MODE" in
     export MERGE_CHUNKED=1       # year-by-year merge; full-frame load OOMs on 24 GB
 
     # ---- training: 2002-2015, quiet-2009 kept out as interior holdout ----
-    export TEC_LAG_MODE="time"   # exact t-2500s / t-24h TEC lags (gap-robust)
+    # TEC lag (single, time-based t-3h) is fixed in CoreModel/config.py.
     # Storm-history ap features (ap_daily, ap_0h, ap_m9h, ap_avg12_33h,
     # ap_avg36_57h) — the integrated-heating drivers NRLMSIS itself uses.
     # Opt in with AP_HISTORY=1; must be set for BOTH train and ontrack.
@@ -83,6 +96,17 @@ case "$MODE" in
     fi
 
     # ---- rolling out-of-sample evaluation: held-out regimes ----
+    # Warm-start lookback: days of history each rolling step fine-tunes on.
+    # Pinned here because on_track.py's own default (14) is not the value the
+    # reported results use.
+    #
+    # Aggregate skill is nearly flat over 3-7 days, with longer marginally
+    # better in quiet conditions. 3 is chosen for transition behaviour: a
+    # shorter lookback carries less quiet-day history into a rising storm, so
+    # it overshoots less. In storm-2015 (matched, dr1, h=1) it roughly halves
+    # the windows that lose to MSIS and cuts the worst window from +130% to
+    # +44%. Set 5 or 7 to trade that back for slightly better steady-state fit.
+    export ONTRACK_LOOKBACK_DAYS="${ONTRACK_LOOKBACK_DAYS:-3}"
     export ONTRACK_DATA_FILE="grace_data_merged_v5_full.parquet"
     export ONTRACK_MODEL_FILE="$TRAIN_MODEL_OUT"
     export ONTRACK_SCALER_X_FILE="$TRAIN_SCALER_X_OUT"
@@ -103,14 +127,19 @@ case "$MODE" in
       else
         _V="v8_storm_2002train"
       fi
-      export TRAIN_MODEL_OUT="xgb_model_${_V}.json"
-      export TRAIN_SCALER_X_OUT="scaler_xgboost_X_${_V}.joblib"
-      export TRAIN_SCALER_Y_OUT="scaler_xgboost_y_${_V}.joblib"
-      export ONTRACK_MODEL_FILE="$TRAIN_MODEL_OUT"
-      export ONTRACK_SCALER_X_FILE="$TRAIN_SCALER_X_OUT"
-      export ONTRACK_SCALER_Y_FILE="$TRAIN_SCALER_Y_OUT"
-      export ONTRACK_OUTPUT_ROOT="runs_${_V}"
-      export ONTRACK_FILTERS="quiet2009,storm2015,post2016"
+      # The block above already set the 'new'-variant names unconditionally,
+      # so ${VAR:-...} here would never fall back to the storm names. Consult
+      # the caller's environment instead, captured before any export ran.
+      export TRAIN_MODEL_OUT="${_ENV_TRAIN_MODEL_OUT:-xgb_model_${_V}.json}"
+      export TRAIN_SCALER_X_OUT="${_ENV_TRAIN_SCALER_X_OUT:-scaler_xgboost_X_${_V}.joblib}"
+      export TRAIN_SCALER_Y_OUT="${_ENV_TRAIN_SCALER_Y_OUT:-scaler_xgboost_y_${_V}.joblib}"
+      export ONTRACK_MODEL_FILE="${_ENV_ONTRACK_MODEL_FILE:-$TRAIN_MODEL_OUT}"
+      export ONTRACK_SCALER_X_FILE="${_ENV_ONTRACK_SCALER_X_FILE:-$TRAIN_SCALER_X_OUT}"
+      export ONTRACK_SCALER_Y_FILE="${_ENV_ONTRACK_SCALER_Y_FILE:-$TRAIN_SCALER_Y_OUT}"
+      # ontrack's resume-skip silently reuses whatever it finds in the output
+      # root, so a run against a retrained model needs its own root.
+      export ONTRACK_OUTPUT_ROOT="${_ENV_ONTRACK_OUTPUT_ROOT:-runs_${_V}}"
+      export ONTRACK_FILTERS="${_ENV_ONTRACK_FILTERS:-quiet2009,storm2015,post2016}"
     fi
     ;;
   old)

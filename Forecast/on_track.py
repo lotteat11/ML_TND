@@ -3,7 +3,8 @@
 """
 ontrack.py
 - Runs rolling warm-start forecasts on data outside the 2009–2016 training window.
-- Fine-tunes the base model each step using the previous 5 days, with early stopping.
+- Fine-tunes the base model each step on the preceding ONTRACK_LOOKBACK_DAYS
+  days (default 3), with early stopping.
 - Tests 8 combinations of retrain/no-retrain, pre/post-training dates, and 1 or 3-day horizons.
 """
 
@@ -11,7 +12,9 @@ ontrack.py
 import os
 import sys
 import tempfile
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, "CoreModel"))
 import copy
 import gc
 import json
@@ -25,6 +28,7 @@ import xgboost as xgb
 
 # Your helper module with feature engineering and plotting utilities
 import feature_functions as ff
+from config import FEATURES, COLS_TO_SCALE, TEC_LAGS, TEC_LAG_COLS
 
 # %% ----------------------------- CONFIGURATION --------------------------------
 # Turn plotting on/off for the initial MSIS vs Observed plot (not essential for batch runs)
@@ -42,21 +46,93 @@ TARGET_COL = "log_ratio"
 
 # Model/scaler filenames (must already exist — these are from your current setup)
 # Defaults below can be overridden via environment variables (see run_pipeline.sh)
-MODEL_FILE = os.environ.get("ONTRACK_MODEL_FILE", "xgb_model_v3.json")           # base model
-SCALER_X_FILE = os.environ.get("ONTRACK_SCALER_X_FILE", "scaler_xgboost_X_v3.joblib")  # fitted feature scaler
-SCALER_Y_FILE = os.environ.get("ONTRACK_SCALER_Y_FILE", "scaler_xgboost_y_v3.joblib")  # fitted target scaler
+# The reported model and its scalers: 17 features, TEC_LAGS=3h, AP_HISTORY=1.
+# These three must agree with each other and with CoreModel/config.py.
+MODEL_FILE = os.environ.get(
+    "ONTRACK_MODEL_FILE", "xgb_model_v8_storm_ap_2002train.json")
+SCALER_X_FILE = os.environ.get(
+    "ONTRACK_SCALER_X_FILE", "scaler_xgboost_X_v8_storm_ap_2002train.joblib")
+SCALER_Y_FILE = os.environ.get(
+    "ONTRACK_SCALER_Y_FILE", "scaler_xgboost_y_v8_storm_ap_2002train.joblib")
 
 # Data file (merged dataset). We will not globally filter; each run filters internally.
-DATA_FILE = os.environ.get("ONTRACK_DATA_FILE", "grace_data_merged2.parquet")
+DATA_FILE = os.environ.get("ONTRACK_DATA_FILE", "grace_data_merged_v5_full.parquet")
+
+
+def _at_root(path: str) -> str:
+    """Resolve a repo-relative path, so defaults work from any cwd
+    (CoreModel/config.py resolves its own paths against ROOT the same way)."""
+    return path if os.path.isabs(path) else os.path.join(_ROOT, path)
+
+
+MODEL_FILE    = _at_root(MODEL_FILE)
+SCALER_X_FILE = _at_root(SCALER_X_FILE)
+SCALER_Y_FILE = _at_root(SCALER_Y_FILE)
+DATA_FILE     = _at_root(DATA_FILE)
 
 # Output root folder for all run artifacts (CSV, PNG, updated models, etc.)
 OUTPUT_ROOT = os.environ.get("ONTRACK_OUTPUT_ROOT", "runs")
 
 # Optional tuned core-model parameters. When provided, warm-start uses the same
 # tree-shape parameters for newly added trees instead of XGBoost load defaults.
-ONTRACK_PARAMS_JSON = os.environ.get("ONTRACK_PARAMS_JSON", "").strip()
+# Days of history each warm-start step fine-tunes on, immediately before the
+# forecast window. Override with ONTRACK_LOOKBACK_DAYS.
+# 3 days: aggregate skill is nearly flat over 3-7, but a shorter lookback
+# carries less quiet-day history into a rising storm and so overshoots less at
+# transitions. On matched storm-2015 runs it roughly halves the windows that
+# lose to MSIS and cuts the worst window from +130% to +44%.
+LOOKBACK_DAYS = int(os.environ.get("ONTRACK_LOOKBACK_DAYS", "3"))
+if LOOKBACK_DAYS < 1:
+    raise ValueError("ONTRACK_LOOKBACK_DAYS must be >= 1")
+
+# Learning rate the warm-start schedule starts from, before its per-round decay
+# (see lr_scheduler). Override with ONTRACK_WARMSTART_LR.
+WARMSTART_LR = float(os.environ.get("ONTRACK_WARMSTART_LR", "0.005"))
+if WARMSTART_LR <= 0:
+    raise ValueError("ONTRACK_WARMSTART_LR must be > 0")
+
+# The rate is multiplied by DECAY every STEP boosting rounds. Together with the
+# initial rate these set how far one fine-tuning step can move the model.
+WARMSTART_LR_DECAY = float(os.environ.get("ONTRACK_WARMSTART_LR_DECAY", "0.9"))
+WARMSTART_LR_STEP = int(os.environ.get("ONTRACK_WARMSTART_LR_STEP", "20"))
+if not 0 < WARMSTART_LR_DECAY <= 1:
+    raise ValueError("ONTRACK_WARMSTART_LR_DECAY must be in (0, 1]")
+if WARMSTART_LR_STEP < 1:
+    raise ValueError("ONTRACK_WARMSTART_LR_STEP must be >= 1")
+
+# Boosting rounds each fine-tuning step may add, and how many rounds without
+# improvement end it. Patience bounds how far one step can move the model, so
+# it interacts with the learning rate above.
+WARMSTART_ROUNDS = int(os.environ.get("ONTRACK_WARMSTART_ROUNDS", "2000"))
+WARMSTART_PATIENCE = int(os.environ.get("ONTRACK_WARMSTART_PATIENCE", "60"))
+if WARMSTART_ROUNDS < 1 or WARMSTART_PATIENCE < 1:
+    raise ValueError("ONTRACK_WARMSTART_ROUNDS/PATIENCE must be >= 1")
+
+# Rolling steps between resets of the fine-tuned model back to the original.
+# Bounds how far warm-start can drift from the trained baseline; with a 1-day
+# rolling step this is a reset every N days. Override with ONTRACK_RESET_EVERY.
+RESET_EVERY = int(os.environ.get("ONTRACK_RESET_EVERY", "4"))
+if RESET_EVERY < 1:
+    raise ValueError("ONTRACK_RESET_EVERY must be >= 1")
+
+# Tree shape for the trees warm-start ADDS. Without this the new trees fall
+# back to XGBoost load defaults and no longer match the base model, so the
+# tuned search is defaulted here rather than left to the caller.
+ONTRACK_PARAMS_JSON = os.environ.get(
+    "ONTRACK_PARAMS_JSON", "tuning_v13_tec3h_depth3_10/best_params.json").strip()
 ONTRACK_TREE_PARAMS = None
 if ONTRACK_PARAMS_JSON:
+    # Resolve relative to the repo root, so the default works from any cwd.
+    _params_path = (ONTRACK_PARAMS_JSON
+                    if os.path.isabs(ONTRACK_PARAMS_JSON)
+                    else os.path.join(_ROOT, ONTRACK_PARAMS_JSON))
+    if not os.path.isfile(_params_path):
+        raise FileNotFoundError(
+            f"ONTRACK_PARAMS_JSON not found: {_params_path}. Set it to a tuned "
+            f"parameter file, or to '' to use XGBoost defaults for the trees "
+            f"warm-start adds (which will not match the base model)."
+        )
+    ONTRACK_PARAMS_JSON = _params_path
     with open(ONTRACK_PARAMS_JSON) as fh:
         _tuned = json.load(fh)
     ONTRACK_TREE_PARAMS = {
@@ -67,16 +143,11 @@ if ONTRACK_PARAMS_JSON:
     }
     print(f"Warm-start tree params from {ONTRACK_PARAMS_JSON}: {ONTRACK_TREE_PARAMS}")
 
-# TEC lag features: "rows" = historical shift(500)/shift(17280) (v3 model),
-# "time" = exact, gap-robust lookups at t-2500s / t-24h (full-mission setup).
-# Must match the mode the base model was trained with.
-TEC_LAG_MODE = os.environ.get("TEC_LAG_MODE", "rows")
-
 # %% ----------------------------- LOAD THE DATA --------------------------------
 # Keep only the schema globally. Each run uses Parquet predicate pushdown so
 # the 82.5M-row full-mission dataset is never kept resident in its entirety.
 _RAW_NEEDED = sorted({
-    "grace_time", "lat", "lon", "alt_km", "lst_h",
+    "grace_time", "source", "lat", "lon", "alt_km", "lst_h",
     "rho_obs", "msis_rho", "matched_tec_value",
     "f107", "f107a",
     "ap_daily", "ap_0h", "ap_m3h", "ap_m6h", "ap_m9h",
@@ -128,35 +199,11 @@ def _load_regime(date_filter: str) -> pd.DataFrame:
     return frame
 
 
-# %% ----------------------- FEATURE LISTS (YOUR SETUP) -------------------------
-# Columns to scale (kept from your script)
-cols_to_scale = [
-    "f107", "ap_m6h", "lat", "f107a", "alt_km",
-    "matched_tec_value", "ap_m3h", "vtec_matched_lag", "vtec_matched_lag2"
-]
-
-# Full ordered feature set used for training/prediction (kept from your script)
-columns_to_keep = [
-    "f107a", "lat",
-    "matched_tec_value",
-    "lon_cos",
-    "lon_sin", "lst_sin", "ap_m3h",
-    "doy_sin", "doy_cos", "f107", "alt_km",
-    "ap_m6h",
-    "vtec_matched_lag", "vtec_matched_lag2",
-    "lst_lat_sin"
-]
-
-# Storm-history drivers (see CoreModel/config.py). Must match the feature set
-# the base model was trained with — AP_HISTORY=1 for both training and here.
-AP_HISTORY_FEATURES = ["ap_m9h", "ap_avg12_33h", "ap_avg36_57h"]
-AP_HISTORY_FEATURES_FULL = ["ap_daily", "ap_0h"] + AP_HISTORY_FEATURES
-
-_ap = os.environ.get("AP_HISTORY", "1")
-if _ap != "0":
-    _extra = AP_HISTORY_FEATURES_FULL if _ap == "full" else AP_HISTORY_FEATURES
-    columns_to_keep = columns_to_keep + _extra
-    cols_to_scale = cols_to_scale + _extra
+# %% ----------------------- FEATURE LISTS ------------------------------------
+# Imported from CoreModel/config.py so training and inference cannot drift.
+# AP_HISTORY / NO_AP are read there and apply to both.
+columns_to_keep = list(FEATURES)
+cols_to_scale = list(COLS_TO_SCALE)
 
 # %% ----------------------- LR SCHEDULER (YOUR LOGIC) --------------------------
 def lr_scheduler(current_round: int):
@@ -164,12 +211,11 @@ def lr_scheduler(current_round: int):
     Learning rate scheduler for native XGBoost API.
     Mirrors your setup: ultra-low LR initially, then exponential decay.
     """
-    initial_lr = 0.005
+    initial_lr = WARMSTART_LR
     if current_round < 4:
         initial_lr = 1e-7
-    decay_factor = 0.9
-    step_size = 20
-    calculated_lr = initial_lr * (decay_factor ** (current_round // step_size))
+    calculated_lr = initial_lr * (WARMSTART_LR_DECAY **
+                                  (current_round // WARMSTART_LR_STEP))
     if current_round % 100 == 0:
         print(f"Round {current_round}: LR = {calculated_lr:.8f}")
     return calculated_lr
@@ -183,8 +229,8 @@ def update_xgb_model_aggressive_with_callbacks(
     scaler_y,
     columns_to_keep,
     cols_to_scale,
-    extra_rounds: int = 2000,
-    patience_rounds: int = 60,
+    extra_rounds: int = WARMSTART_ROUNDS,
+    patience_rounds: int = WARMSTART_PATIENCE,
     lr_scheduler=lr_scheduler,
     tree_params: dict | None = None
 ):
@@ -332,7 +378,8 @@ def run_experiment(do_retrain: int,
     Run the rolling fine-tune + forecast with chosen settings and save outputs.
 
     Args:
-        do_retrain: 1 to fine-tune each step on previous 5 days; 0 to skip.
+        do_retrain: 1 to fine-tune each step on the preceding
+                    LOOKBACK_DAYS days; 0 to skip.
         date_filter: "pre2009" or "post2016".
         window_size: forecast horizon in days (1 or 3).
         tag: unique label used to distinguish outputs (e.g., dr1_post2016_h3).
@@ -342,12 +389,19 @@ def run_experiment(do_retrain: int,
         pred_df: dataframe containing all predictions for this run.
         metrics: dict with overall metrics for this run.
     """
-    DATE_TO_SAVE_MODEL = _utc("2009-01-10")
+    # Day whose fine-tuned model is written out as a snapshot. Forecast/
+    # off_track.py loads that snapshot to build its global map, so the map can
+    # only be made for a date that has one. Overridable per regime rather than
+    # hardcoded, so choosing a different day for the off-track figure does not
+    # need a code edit:
+    #   ONTRACK_SNAPSHOT_POST2016=2016-03-07
     print(tag)
     if "pre2009" in tag:
-        DATE_TO_SAVE_MODEL = _utc("2009-01-13")
+        DATE_TO_SAVE_MODEL = _utc(
+            os.environ.get("ONTRACK_SNAPSHOT_PRE2009", "2009-01-13"))
     elif "post2016" in tag:
-        DATE_TO_SAVE_MODEL = _utc("2016-02-18")
+        DATE_TO_SAVE_MODEL = _utc(
+            os.environ.get("ONTRACK_SNAPSHOT_POST2016", "2016-02-18"))
     else:
         DATE_TO_SAVE_MODEL = None
     print(DATE_TO_SAVE_MODEL)
@@ -367,18 +421,13 @@ def run_experiment(do_retrain: int,
     df_local['lon_sin'] = np.sin(np.deg2rad(df_local['lon']))
     df_local['lon_cos'] = np.cos(np.deg2rad(df_local['lon']))
     df_local['lst_lat_cos'] = df_local['lst_cos'] * df_local['lat']
-    if TEC_LAG_MODE == "time":
-        df_local = ff.add_tec_time_lag_features(df_local, time_col="time")
-    else:
-        df_local['vtec_matched_lag']  = df_local['matched_tec_value'].shift(500)
-        df_local['vtec_matched_lag2'] = df_local['matched_tec_value'].shift(17280)
+    df_local = ff.add_tec_time_lag_features(
+        df_local, time_col="time", lags=TEC_LAGS, names=TEC_LAG_COLS)
     df_local['lst_lat_sin'] = df_local['lst_sin'] * df_local['lat']
     df_local['ap_change'] = df_local['ap_0h'] - df_local['ap_m3h']
     df_local[TARGET_COL] = np.log(df_local["rho_obs"] / df_local["msis_rho"])
-    df_local.dropna(subset=sorted(set([
-        "f107", "ap_m6h", "lat", "f107a", "alt_km",
-        "matched_tec_value", "ap_m3h", "vtec_matched_lag", "vtec_matched_lag2", "log_ratio"
-    ]) | set(cols_to_scale)), inplace=True)
+    df_local.dropna(subset=sorted(set(columns_to_keep) | {TARGET_COL}),
+                    inplace=True)
     # Drop columns nothing downstream needs, before the rolling loop starts
     # copying per-window slices of this frame 100s of times.
     needed_cols = set(columns_to_keep) | set(cols_to_scale) | {
@@ -414,18 +463,21 @@ def run_experiment(do_retrain: int,
     # h3 window, and pd.concat briefly duplicated the complete result.
     pred_parquet = os.path.join(run_dir, f".predictions_{tag}.staging.parquet")
     pred_writer = None
-    step = 10
+    # Counts rolling steps, so the first window is step 1 and resets land on
+    # exact multiples of RESET_EVERY.
+    step = 0
 
-    for start_idx in range(15, len(unique_dates) - window_size + 1, step_size):
+    # Start one day past the lookback, preserving the original rolling setup.
+    for start_idx in range(LOOKBACK_DAYS + 1,
+                           len(unique_dates) - window_size + 1, step_size):
         step += 1
-   
 
-        if step % 4 == 0:
+        if step % RESET_EVERY == 0:
             # periodic reset to the original model
             base_model = copy.deepcopy(original_model)
 
-        # previous 5 days used for fine-tuning
-        prev_days = unique_dates[start_idx -14: start_idx]
+        # Days immediately before the forecast window, used for fine-tuning.
+        prev_days = unique_dates[start_idx - LOOKBACK_DAYS: start_idx]
         train_data = df_feat_predict_local[df_feat_predict_local['date'].isin(prev_days)].copy()
 
         if do_retrain:
@@ -437,7 +489,8 @@ def run_experiment(do_retrain: int,
                 scaler_y=scaler_y,
                 columns_to_keep=columns_to_keep,
                 cols_to_scale=cols_to_scale,
-                extra_rounds=2000,
+                extra_rounds=WARMSTART_ROUNDS,
+                patience_rounds=WARMSTART_PATIENCE,
                 tree_params=ONTRACK_TREE_PARAMS,
             )
         del train_data
@@ -593,8 +646,22 @@ if __name__ == "__main__":
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
 
     # Full 8 combinations (12 with the full-mission filters):
-    do_retrain_opts = [0, 1]
-    date_filters    = os.environ.get("ONTRACK_FILTERS", "pre2009,post2016").split(",")
+    # 0 = core model only, 1 = warm-start. Both by default; ONTRACK_RETRAIN=1
+    # runs only the warm-start half, e.g. when all that is wanted is the model
+    # snapshot dr1 writes for the off-track map.
+    do_retrain_opts = [
+        int(v) for v in os.environ.get("ONTRACK_RETRAIN", "0,1").split(",")
+        if v.strip()
+    ]
+    if not do_retrain_opts or set(do_retrain_opts) - {0, 1}:
+        raise ValueError(
+            f"ONTRACK_RETRAIN must be 0 and/or 1 "
+            f"(got {os.environ.get('ONTRACK_RETRAIN', '')!r})"
+        )
+    # The three reported holdout regimes. pre2009 belongs to the published
+    # 2009-2016 setup and is not a holdout of the 2002-2015 model.
+    date_filters    = os.environ.get(
+        "ONTRACK_FILTERS", "quiet2009,storm2015,post2016").split(",")
     horizons = [
         int(value.strip())
         for value in os.environ.get("ONTRACK_HORIZONS", "1,3").split(",")

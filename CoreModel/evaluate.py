@@ -28,8 +28,29 @@ from plotting import (
     plot_density_hist2d,
     plot_error_map,
     plot_residual_diagnostics,
+    _compute_density_metrics,
 )
 from train import load_and_engineer
+
+
+def _score_split(df, time_col="time", obs_col="rho_obs",
+                 msis_col="rho_msis", pred_col="rho_pred",
+                 sample_step=1) -> dict:
+    """Metrics for one split without drawing anything.
+
+    Mirrors the filtering plot_val_densities_with_metrics applies (same dropna,
+    same stride, same positivity mask) so val and test rows are directly
+    comparable, and reuses its metric code rather than restating it.
+    """
+    d = df[[time_col, obs_col, msis_col, pred_col]].dropna()
+    if sample_step > 1:
+        d = d.iloc[::sample_step]
+    obs  = d[obs_col].to_numpy()
+    msis = d[msis_col].to_numpy()
+    pred = d[pred_col].to_numpy()
+    mask = (obs > 0) & (msis > 0) & (pred > 0)
+    return {"MSIS": _compute_density_metrics(obs[mask], msis[mask]),
+            "Pred": _compute_density_metrics(obs[mask], pred[mask])}
 
 
 if __name__ == "__main__":
@@ -79,18 +100,54 @@ if __name__ == "__main__":
     )
 
     # 5. Back-transform to physical density
-    y_pred_val = ff.unscale_y_pred(y_pred_val_s, scaler_y, y_val_s)
+    def to_physical(idx, y_true, y_pred_s, y_s):
+        """Scaled prediction -> physical density, on one split."""
+        y_pred = ff.unscale_y_pred(y_pred_s, scaler_y, y_s)
+        d = df_feat.loc[idx].copy()
+        d["y_true_log"] = y_true[TARGET].values.ravel()
+        d["y_pred_log"] = np.asarray(y_pred).ravel()
+        d["rho_msis"]   = d["tnd_kg_m3"] if "tnd_kg_m3" in d.columns else d["msis_rho"]
+        d["rho_pred"]   = d["rho_msis"] * np.exp(d["y_pred_log"])
+        if "rho_obs" in d.columns:
+            d["ratio_pred"] = d["rho_pred"] / d["rho_obs"]
+        return d
 
-    df_val = df_feat.loc[idx_val].copy()
-    df_val["y_true_log"] = y_val[TARGET].values.ravel()
-    df_val["y_pred_log"] = np.asarray(y_pred_val).ravel()
-    df_val["rho_msis"]   = df_val["tnd_kg_m3"] if "tnd_kg_m3" in df_val.columns else df_val["msis_rho"]
-    df_val["rho_pred"]   = df_val["rho_msis"] * np.exp(df_val["y_pred_log"])
-    if "rho_obs" in df_val.columns:
-        df_val["ratio_pred"] = df_val["rho_pred"] / df_val["rho_obs"]
+    df_val  = to_physical(idx_val,  y_val,  y_pred_val_s,  y_val_s)
+    df_test = to_physical(idx_test, y_test, y_pred_test_s, y_test_s)
 
-    # 6. Density time-series and parity plots
-    plot_val_densities_with_metrics(df_val, sample_step=10)
+    # 6. Density time-series and parity plots (figures are for the val split;
+    # the test split is scored for the table only, so it does not overwrite
+    # the val figures under figs/).
+    SAMPLE_STEP = int(os.environ.get("EVAL_SAMPLE_STEP", "10"))
+    val_metrics  = plot_val_densities_with_metrics(df_val,  sample_step=SAMPLE_STEP)
+    test_metrics = _score_split(df_test, sample_step=SAMPLE_STEP)
+
+    # 6b. Persist val AND test metrics. They used to exist only as text baked
+    # into the parity-plot labels, so quoting r (or any of them) meant reading a
+    # number off a PNG — and the test split was predicted but never scored in
+    # physical space at all. Written next to the model so the file names the run.
+    metrics_csv = os.environ.get(
+        "EVAL_METRICS_CSV",
+        f"eval_metrics_{os.path.splitext(os.path.basename(str(MODEL_OUT)))[0]}.csv",
+    )
+    rows = []
+    for split, d, mm in [("val", df_val, val_metrics),
+                         ("test", df_test, test_metrics)]:
+        for name, m in mm.items():
+            rows.append({"model": os.path.basename(str(MODEL_OUT)),
+                         "split": split, "source": name,
+                         "n": len(d), "sample_step": SAMPLE_STEP, **m})
+    pd.DataFrame(rows).to_csv(metrics_csv, index=False)
+
+    print(f"\nWrote val + test metrics -> {metrics_csv}")
+    for split, m in [("val", val_metrics), ("test", test_metrics)]:
+        for name in ("MSIS", "Pred"):
+            s = m[name]
+            print(f"  {split:>4} {name:>4}: RMSE={s['rmse_lin']:.3e} "
+                  f"RMSE_log={s['rmse_log']:.4f} MAPE={s['mape']:.2f}% "
+                  f"R2={s['r2']:.4f} r={s['r']:.4f}")
+    print(f"  (full-split log-space RMSE: val {rmse_val:.4f}, test {rmse_test:.4f}; "
+          f"the metrics above are on every {SAMPLE_STEP}th row)")
 
     # 7. 2D histograms
     plot_density_hist2d(df_val, obs_col="rho_obs", pred_col="rho_pred",

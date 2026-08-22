@@ -13,7 +13,7 @@ This script repeats the exact same rolling warm-start experiment, but replaces
 every driver value inside the forecast window with what would actually be
 available at issue time (start of the forecast window):
 
-  - TEC features (matched_tec_value, vtec_matched_lag, vtec_matched_lag2):
+  - TEC features (matched_tec_value, vtec_matched_lag):
       persistence of the along-track TEC field. For each forecast point we
       look up the value from the LAST KNOWN DAY (day t-1) at the nearest
       (latitude, local-solar-time) geometry, using a k-d tree. TEC is
@@ -43,7 +43,9 @@ Outputs go to runs_persisted/ (original runs/ untouched).
 # %% --------------------------------- IMPORTS ---------------------------------
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, "CoreModel"))
 import copy
 import numpy as np
 import pandas as pd
@@ -52,6 +54,7 @@ import xgboost as xgb
 from scipy.spatial import cKDTree
 
 import feature_functions as ff
+from config import FEATURES, COLS_TO_SCALE, TEC_LAGS, TEC_LAG_COLS
 
 # %% ----------------------------- CONFIGURATION --------------------------------
 TARGET_COL = "log_ratio"
@@ -68,27 +71,15 @@ OUTPUT_ROOT = "runs_persisted"
 # so any moderate weight cleanly separates ascending/descending passes.
 LST_KDTREE_WEIGHT = 20.0
 
-TEC_COLS = ["matched_tec_value", "vtec_matched_lag", "vtec_matched_lag2"]
+TEC_COLS = ["matched_tec_value", *TEC_LAG_COLS]
 
 # %% ----------------------------- LOAD THE DATA --------------------------------
 df = pd.read_parquet(DATA_FILE)
 
-# %% ----------------------- FEATURE LISTS (SAME AS on_track.py) ----------------
-cols_to_scale = [
-    "f107", "ap_m6h", "lat", "f107a", "alt_km",
-    "matched_tec_value", "ap_m3h", "vtec_matched_lag", "vtec_matched_lag2"
-]
-
-columns_to_keep = [
-    "f107a", "lat",
-    "matched_tec_value",
-    "lon_cos",
-    "lon_sin", "lst_sin", "ap_m3h",
-    "doy_sin", "doy_cos", "f107", "alt_km",
-    "ap_m6h",
-    "vtec_matched_lag", "vtec_matched_lag2",
-    "lst_lat_sin"
-]
+# %% ----------------------- FEATURE LISTS ------------------------------------
+# Imported from CoreModel/config.py so training and inference cannot drift.
+columns_to_keep = list(FEATURES)
+cols_to_scale = list(COLS_TO_SCALE)
 
 # %% ----------------------- LR SCHEDULER (SAME AS on_track.py) -----------------
 def lr_scheduler(current_round: int):
@@ -293,15 +284,13 @@ def run_experiment(do_retrain: int,
     df_feat_local['lon_sin'] = np.sin(np.deg2rad(df_feat_local['lon']))
     df_feat_local['lon_cos'] = np.cos(np.deg2rad(df_feat_local['lon']))
     df_feat_local['lst_lat_cos'] = df_feat_local['lst_cos'] * df_feat_local['lat']
-    df_feat_local['vtec_matched_lag']  = df_feat_local['matched_tec_value'].shift(500)
-    df_feat_local['vtec_matched_lag2'] = df_feat_local['matched_tec_value'].shift(17280)
+    df_feat_local = ff.add_tec_time_lag_features(
+        df_feat_local, time_col="time", lags=TEC_LAGS, names=TEC_LAG_COLS)
     df_feat_local['lst_lat_sin'] = df_feat_local['lst_sin'] * df_feat_local['lat']
     df_feat_local['ap_change'] = df_feat_local['ap_0h'] - df_feat_local['ap_m3h']
     df_feat_local[TARGET_COL] = np.log(df_feat_local["rho_obs"] / df_feat_local["msis_rho"])
-    df_feat_local = df_feat_local.dropna(subset=[
-        "f107", "ap_m6h", "lat", "f107a", "alt_km",
-        "matched_tec_value", "ap_m3h", "vtec_matched_lag", "vtec_matched_lag2", "log_ratio"
-    ])
+    df_feat_local = df_feat_local.dropna(
+        subset=sorted(set(columns_to_keep) | {TARGET_COL}))
     df_feat_predict_local = df_feat_local.copy()
 
     # ---- 2) Load original model + scalers ----

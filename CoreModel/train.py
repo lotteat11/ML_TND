@@ -23,10 +23,13 @@ from xgboost.callback import EarlyStopping, LearningRateScheduler
 import feature_functions as ff
 
 from config import (
+    ROOT,
     PARQUET_FILE, MODEL_OUT, SCALER_X_OUT, SCALER_Y_OUT,
-    TIME_MIN, TIME_MAX, TIME_EXCLUDE, TEC_LAG_MODE, TARGET, FEATURES, COLS_TO_SCALE,
+    TIME_MIN, TIME_MAX, TIME_EXCLUDE, TEC_LAGS, TEC_LAG_COLS,
+    TARGET, FEATURES, COLS_TO_SCALE,
 )
 from plotting import (
+    FIG_DIR, show,
     plot_feature_distributions, plot_split_targets, plot_training_curve,
 )
 
@@ -57,7 +60,7 @@ def load_and_engineer(parquet_file: str) -> pd.DataFrame:
     # 82.5M rows x 31 columns (~20 GB in pandas), and reading it all before the
     # time filter is applied is enough to exhaust memory on its own.
     raw_needed = sorted({
-        "grace_time", "lat", "lon", "alt_km", "lst_h",
+        "grace_time", "source", "lat", "lon", "alt_km", "lst_h",
         "rho_obs", "msis_rho", "matched_tec_value",
         "f107", "f107a",
         "ap_daily", "ap_0h", "ap_m3h", "ap_m6h", "ap_m9h",
@@ -73,14 +76,10 @@ def load_and_engineer(parquet_file: str) -> pd.DataFrame:
     df["lon_sin"]           = np.sin(np.deg2rad(df["lon"]))
     df["lon_cos"]           = np.cos(np.deg2rad(df["lon"]))
     df["lst_lat_sin"]       = df["lst_sin"] * df["lat"]
-    if TEC_LAG_MODE == "time":
-        df = ff.add_tec_time_lag_features(df)
-    else:
-        df["vtec_matched_lag"]  = df["matched_tec_value"].shift(500)
-        df["vtec_matched_lag2"] = df["matched_tec_value"].shift(17280)
+    df = ff.add_tec_time_lag_features(df, lags=TEC_LAGS, names=TEC_LAG_COLS)
     df["log_ratio"]         = np.log(df["rho_obs"] / df["msis_rho"])
-    # Interior holdouts are dropped AFTER the shift-based lags are built, so
-    # rows just after a holdout keep their physically correct TEC lag values.
+    # Interior holdouts are dropped AFTER the TEC lag is built, so rows just
+    # after a holdout keep their physically correct TEC lag values.
     if TIME_EXCLUDE is not None:
         for lo, hi in TIME_EXCLUDE:
             n_before = len(df)
@@ -168,8 +167,12 @@ if __name__ == "__main__":
         "nthread":          -1,
     }
 
-    # Optional tuned hyperparameters (from CoreModel/tune.py) via
-    # TRAIN_PARAMS_JSON — overrides tree params and the LR schedule.
+    # Tuned hyperparameters (from CoreModel/tune.py) via TRAIN_PARAMS_JSON —
+    # overrides the tree params and LR schedule above. Defaulted to the adopted
+    # search so a plain `python CoreModel/train.py` reproduces the reported
+    # model; set TRAIN_PARAMS_JSON='' to fall back to the literals above.
+    os.environ.setdefault("TRAIN_PARAMS_JSON",
+                          str(ROOT / "tuning_v13_tec3h_depth3_10" / "best_params.json"))
     lr_schedule = lr_scheduler
     if os.environ.get("TRAIN_PARAMS_JSON"):
         import json
@@ -217,6 +220,11 @@ if __name__ == "__main__":
         "importance": list(scores.values()),
     }).sort_values("importance", ascending=False)
     print(feat_imp.head(15))
-    plt.figure(figsize=(8, 6))
-    xgb.plot_importance(model, importance_type="gain", max_num_features=20)
-    plt.show()
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
+    feat_imp.to_csv(FIG_DIR / "feature_importance.csv", index=False)
+    # plot_importance makes its own axes, so size them here rather than
+    # creating a separate figure it would leave empty.
+    _, ax = plt.subplots(figsize=(8, 6))
+    xgb.plot_importance(model, importance_type="gain", max_num_features=20,
+                        ax=ax)
+    show("feature_importance")

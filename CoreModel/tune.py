@@ -69,7 +69,7 @@ def make_lr_scheduler(initial_lr: float, decay_factor: float = 0.8,
 
 # Default search space: name -> callable(rng) drawing one value.
 DEFAULT_SPACE = {
-    "max_depth":        lambda rng: int(rng.integers(3, 10)),
+    "max_depth":        lambda rng: int(rng.integers(3, 11)),             # 3 .. 10
     "min_child_weight": lambda rng: float(10 ** rng.uniform(1, 3)),      # 10 .. 1000
     "subsample":        lambda rng: float(rng.uniform(0.4, 0.9)),
     "colsample_bytree": lambda rng: float(rng.uniform(0.4, 1.0)),

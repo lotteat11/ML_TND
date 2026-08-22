@@ -1,0 +1,64 @@
+% Rolling out-of-sample results, 3-day forecast horizon.
+% Source: runs_final_20250821/summary_metrics.csv (warm-start lookback 3 d).
+% Companion to tab:dr_results_h1; identical layout and metric definitions.
+\begin{table}[!ht]
+\centering
+\caption{Comparison of baseline (MSIS) and retrained model performance for
+3-day forecasts. Percentage differences are computed as
+$(\mathrm{Pred}-\mathrm{Baseline})/\mathrm{Baseline}\times100$. Negative values
+indicate improvement for error metrics.}
+\label{tab:dr_results_h3}
+\begin{tabular}{lcccc}
+\hline
+\textbf{Metric} & \textbf{Baseline} & \textbf{Predicted} & \textbf{Diff (\%)} & \textbf{Training} \\
+\hline \hline
+\multicolumn{5}{l}{\textbf{Quiet 2009 (Core)}} \\
+RMSE$_{\log}$ & 0.575 & 0.271 & $-$52.9\% & Core \\
+Top5$_{\log}$ & 1.170 & 0.715 & $-$38.9\% & Core \\
+RMSE (kg\,m$^{-3}$) & 6.98$\times10^{-14}$ & 2.36$\times10^{-14}$ & $-$66.2\% & Core \\
+Top5 (kg\,m$^{-3}$) & 1.63$\times10^{-13}$ & 6.71$\times10^{-14}$ & $-$58.8\% & Core \\
+MAPE (\%) & 73.3 & 23.6 & $-$67.9\% & Core \\
+R$^2$ & $-$0.885 & 0.785 & Improved from negative to positive & Core \\
+\hline
+\multicolumn{5}{l}{\textbf{Quiet 2009 (Warm-start)}} \\
+RMSE$_{\log}$ & 0.575 & 0.224 & $-$61.0\% & Warm-start \\
+Top5$_{\log}$ & 1.170 & 0.614 & $-$47.5\% & Warm-start \\
+RMSE (kg\,m$^{-3}$) & 6.98$\times10^{-14}$ & 1.91$\times10^{-14}$ & $-$72.7\% & Warm-start \\
+Top5 (kg\,m$^{-3}$) & 1.63$\times10^{-13}$ & 5.60$\times10^{-14}$ & $-$65.7\% & Warm-start \\
+MAPE (\%) & 73.3 & 18.1 & $-$75.3\% & Warm-start \\
+R$^2$ & $-$0.885 & 0.859 & Improved from negative to positive & Warm-start \\
+\hline \hline
+\multicolumn{5}{l}{\textbf{Storm 2015 (Core)}} \\
+RMSE$_{\log}$ & 0.188 & 0.147 & $-$22.1\% & Core \\
+Top5$_{\log}$ & 0.517 & 0.427 & $-$17.3\% & Core \\
+RMSE (kg\,m$^{-3}$) & 6.31$\times10^{-13}$ & 4.59$\times10^{-13}$ & $-$27.3\% & Core \\
+Top5 (kg\,m$^{-3}$) & 1.97$\times10^{-12}$ & 1.50$\times10^{-12}$ & $-$24.0\% & Core \\
+MAPE (\%) & 13.7 & 10.7 & $-$21.8\% & Core \\
+R$^2$ & 0.782 & 0.885 & +13.1\% & Core \\
+\hline
+\multicolumn{5}{l}{\textbf{Storm 2015 (Warm-start)}} \\
+RMSE$_{\log}$ & 0.188 & 0.138 & $-$26.9\% & Warm-start \\
+Top5$_{\log}$ & 0.517 & 0.416 & $-$19.4\% & Warm-start \\
+RMSE (kg\,m$^{-3}$) & 6.31$\times10^{-13}$ & 4.31$\times10^{-13}$ & $-$31.7\% & Warm-start \\
+Top5 (kg\,m$^{-3}$) & 1.97$\times10^{-12}$ & 1.46$\times10^{-12}$ & $-$25.7\% & Warm-start \\
+MAPE (\%) & 13.7 & 9.9 & $-$27.9\% & Warm-start \\
+R$^2$ & 0.782 & 0.898 & +14.8\% & Warm-start \\
+\hline \hline
+\multicolumn{5}{l}{\textbf{Post-2016 (Core)}} \\
+RMSE$_{\log}$ & 0.243 & 0.191 & $-$21.7\% & Core \\
+Top5$_{\log}$ & 0.637 & 0.507 & $-$20.4\% & Core \\
+RMSE (kg\,m$^{-3}$) & 5.63$\times10^{-13}$ & 4.40$\times10^{-13}$ & $-$21.8\% & Core \\
+Top5 (kg\,m$^{-3}$) & 1.63$\times10^{-12}$ & 1.35$\times10^{-12}$ & $-$17.5\% & Core \\
+MAPE (\%) & 20.9 & 15.2 & $-$27.3\% & Core \\
+R$^2$ & 0.786 & 0.870 & +10.6\% & Core \\
+\hline
+\multicolumn{5}{l}{\textbf{Post-2016 (Warm-start)}} \\
+RMSE$_{\log}$ & 0.243 & 0.168 & $-$31.2\% & Warm-start \\
+Top5$_{\log}$ & 0.637 & 0.453 & $-$28.8\% & Warm-start \\
+RMSE (kg\,m$^{-3}$) & 5.63$\times10^{-13}$ & 3.98$\times10^{-13}$ & $-$29.3\% & Warm-start \\
+Top5 (kg\,m$^{-3}$) & 1.63$\times10^{-12}$ & 1.26$\times10^{-12}$ & $-$22.6\% & Warm-start \\
+MAPE (\%) & 20.9 & 12.9 & $-$38.3\% & Warm-start \\
+R$^2$ & 0.786 & 0.893 & +13.6\% & Warm-start \\
+\hline
+\end{tabular}
+\end{table}

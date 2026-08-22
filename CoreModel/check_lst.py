@@ -48,10 +48,6 @@ def parse_args() -> argparse.Namespace:
         help="Interior holdout(s), as start,end pairs separated by semicolons.",
     )
     parser.add_argument(
-        "--tec-lag-mode", choices=("time", "rows"), default="time",
-        help="TEC lag construction used by the model.",
-    )
-    parser.add_argument(
         "--ap-history", choices=("0", "1", "full"), default="1",
         help="Ap-history feature configuration used by the model.",
     )
@@ -136,18 +132,17 @@ if __name__ == "__main__":
     os.environ["TRAIN_TIME_MIN"] = args.start
     os.environ["TRAIN_TIME_MAX"] = args.end
     os.environ["TRAIN_TIME_EXCLUDE"] = args.exclude
-    os.environ["TEC_LAG_MODE"] = args.tec_lag_mode
     os.environ["AP_HISTORY"] = args.ap_history
 
     import feature_functions as ff
-    from config import FEATURES, TARGET
+    from config import FEATURES, TARGET, TEC_LAGS, TEC_LAG_COLS
     from train import load_and_engineer
 
     print("Article dataset configuration:")
     print(f"  input:       {input_path}")
     print(f"  period:      {args.start} < time < {args.end}")
     print(f"  holdout:     {args.exclude or 'none'}")
-    print(f"  TEC lags:    {args.tec_lag_mode}")
+    print(f"  TEC lags:    {', '.join(f'{l} -> {c}' for l, c in zip(TEC_LAGS, TEC_LAG_COLS))}")
     print(f"  Ap history:  {args.ap_history}")
     print(f"\nLoading {input_path} ...")
     df = load_and_engineer(input_path)

@@ -2,7 +2,16 @@
 # Aalborg University
 """
 Plotting functions for the XGBoost density correction pipeline.
+
+Figures are written to the directory named by the FIG_DIR environment variable
+(default: figs/) and then closed. Under a non-interactive backend -- which the
+pipeline runner sets via MPLBACKEND=Agg -- a bare plt.show() discards the
+figure, so every diagnostic here routes through `show()` below instead.
 """
+
+import os
+import re
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -12,6 +21,28 @@ from matplotlib.colors import LogNorm
 import seaborn as sns
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from scipy.stats import pearsonr
+
+FIG_DIR = Path(os.environ.get("FIG_DIR", "figs"))
+_used_names: dict = {}
+
+
+def show(name: str, dpi: int = 150) -> Path:
+    """Save the current figure as FIG_DIR/<name>.png, then close it.
+
+    Repeated names within one run get a numeric suffix rather than overwriting,
+    so a function called once per split or per regime keeps every figure.
+    """
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
+    stem = re.sub(r"[^0-9A-Za-z._-]+", "_", name).strip("_") or "figure"
+    seen = _used_names.get(stem, 0)
+    _used_names[stem] = seen + 1
+    if seen:
+        stem = f"{stem}_{seen + 1}"
+    path = FIG_DIR / f"{stem}.png"
+    plt.savefig(path, dpi=dpi, bbox_inches="tight")
+    plt.close()
+    print(f"  figure → {path}")
+    return path
 
 
 def plot_split_targets(idx_train, idx_val, idx_test,
@@ -27,7 +58,7 @@ def plot_split_targets(idx_train, idx_val, idx_test,
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.show()
+    show("split_targets")
 
 
 def plot_feature_distributions(X_train, X_val, X_test, sample_step: int = 520) -> None:
@@ -44,7 +75,7 @@ def plot_feature_distributions(X_train, X_val, X_test, sample_step: int = 520) -
         plt.title(col, fontsize=10)
         plt.legend(fontsize=8)
     plt.tight_layout()
-    plt.show()
+    show("feature_distributions")
 
 
 def _compute_density_metrics(obs: np.ndarray, model: np.ndarray) -> dict:
@@ -82,8 +113,12 @@ def plot_val_densities_with_metrics(
     pred_col: str = "rho_pred",
     sample_step: int = 1,
     parity_alpha: float = 0.5,
-) -> None:
-    """Time-series and parity plot comparing observed, MSIS, and predicted density."""
+) -> dict:
+    """Time-series and parity plot comparing observed, MSIS, and predicted density.
+
+    Returns the metrics dict ({"MSIS": {...}, "Pred": {...}}) so callers can
+    persist them; they were previously only rendered into the parity labels.
+    """
     d = df_val[[time_col, obs_col, msis_col, pred_col]].dropna().copy()
     if sample_step > 1:
         d = d.iloc[::sample_step]
@@ -110,7 +145,7 @@ def plot_val_densities_with_metrics(
     plt.title("Validation: Observed vs MSIS vs Predicted")
     plt.legend()
     plt.tight_layout()
-    plt.show()
+    show("val_density_timeseries")
 
     # Parity plot
     vmax = np.nanmax([obs.max(), msis.max(), pred.max()])
@@ -127,14 +162,16 @@ def plot_val_densities_with_metrics(
     plt.title("Parity (Validation)")
     plt.legend(loc="lower right", framealpha=0.9, fontsize="small")
     plt.tight_layout()
-    plt.show()
+    show("val_parity")
 
     for name, m in [("MSIS", m_msis), ("Pred", m_pred)]:
         print(
             f"{name} : RMSE_log={m['rmse_log']:.3f} ×{np.exp(m['rmse_log']):.2f} | "
             f"P95_log={m['p95_log']:.3f} | RMSE={m['rmse_lin']:.3e} | "
-            f"MAPE={m['mape']:.1f}% | R²={m['r2']:.3f}"
+            f"MAPE={m['mape']:.1f}% | R²={m['r2']:.3f} | r={m['r']:.4f}"
         )
+
+    return {"MSIS": m_msis, "Pred": m_pred}
 
 
 def plot_training_curve(history: dict) -> None:
@@ -151,7 +188,7 @@ def plot_training_curve(history: dict) -> None:
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.show()
+    show("training_curve")
 
 
 def plot_density_hist2d(df: pd.DataFrame,
@@ -178,7 +215,7 @@ def plot_density_hist2d(df: pd.DataFrame,
     plt.title("2D Histogram: Observed vs Predicted (log counts)")
     plt.legend()
     plt.tight_layout()
-    plt.show()
+    show("density_hist2d")
 
 
 def plot_error_map(df: pd.DataFrame, col_x: str, col_y: str,
@@ -197,7 +234,7 @@ def plot_error_map(df: pd.DataFrame, col_x: str, col_y: str,
     plt.xlabel(col_x); plt.ylabel(col_y)
     plt.title(f"{label} across {col_x} vs {col_y}")
     plt.tight_layout()
-    plt.show()
+    show(f"error_map_{col_x}_{col_y}")
 
 
 def plot_residual_diagnostics(y_true: np.ndarray, y_pred: np.ndarray,
@@ -214,24 +251,24 @@ def plot_residual_diagnostics(y_true: np.ndarray, y_pred: np.ndarray,
     plt.figure(figsize=(8, 4))
     plt.hist(res[idx], bins=200)
     plt.title("Residual distribution (y_true - y_pred)")
-    plt.xlabel("Residual"); plt.ylabel("Count"); plt.show()
+    plt.xlabel("Residual"); plt.ylabel("Count"); show("residual_hist")
 
     plt.figure(figsize=(8, 4))
     plt.scatter(y_pred[idx], res[idx], s=1, alpha=0.3)
     plt.axhline(0, ls="--")
     plt.title("Residuals vs Predicted")
-    plt.xlabel("Predicted"); plt.ylabel("Residual"); plt.show()
+    plt.xlabel("Predicted"); plt.ylabel("Residual"); show("residual_vs_pred")
 
     plt.figure(figsize=(8, 4))
     hb = plt.hexbin(y_pred[idx], res[idx], gridsize=440, cmap="viridis", bins="log", mincnt=1)
     plt.axhline(0, ls="--", color="red")
     plt.colorbar(hb, label="log10(N points)")
     plt.title("Residuals vs Predicted (hexbin density)")
-    plt.xlabel("Predicted"); plt.ylabel("Residual"); plt.show()
+    plt.xlabel("Predicted"); plt.ylabel("Residual"); show("residual_vs_pred")
 
     window = 50_000
     roll = pd.Series(np.abs(res)).rolling(window, min_periods=1).mean()
     plt.figure(figsize=(10, 4))
     plt.plot(roll.values, lw=1)
     plt.title(f"Rolling mean |residual| (window={window})")
-    plt.xlabel("Sample index"); plt.ylabel("Rolling MAE"); plt.show()
+    plt.xlabel("Sample index"); plt.ylabel("Rolling MAE"); show("rolling_mae")

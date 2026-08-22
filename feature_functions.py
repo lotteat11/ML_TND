@@ -810,29 +810,59 @@ def timeblock_split_repeated(
 
 
 def add_tec_time_lag_features(df, time_col="time", tec_col="matched_tec_value",
-                              lags=("2500s", "24h"),
-                              names=("vtec_matched_lag", "vtec_matched_lag2"),
-                              tolerance="10min"):
+                              lags=("3h",),
+                              names=("vtec_matched_lag",),
+                              tolerance="10min", group_col=None):
     """
-    True time-based TEC lag features (gap-robust replacement for the historical
-    row-based shift(500)/shift(17280), whose effective median lags these
-    defaults reproduce: ~42 min and 24 h with GA+GB interleaved at 10 s).
+    True time-based TEC lag features, robust to data gaps and to GA/GB
+    interleaving.  The defaults build the production feature: a single lag at
+    t-3h named ``vtec_matched_lag``.
 
-    For each row at time t, looks up the TEC value nearest to t - lag; yields
-    NaN when no sample exists within +/- tolerance (dropna removes those rows
-    downstream), instead of silently returning a value from the wrong time as
-    the row-shift did after data gaps.
+    For each row at time t, looks up the TEC value nearest to t - lag within
+    the same satellite track.  By default the satellite id is inferred from
+    the leading token in ``source`` (e.g. GA/GB); ``group_col`` can override
+    this.  This prevents a GA row from receiving TEC from GB at the lag time.
+    Yields NaN when no sample exists within +/- tolerance.
     """
-    src = df[[time_col, tec_col]].dropna().sort_values(time_col)
-    src = src.rename(columns={time_col: "_t_src", tec_col: "_tec_src"})
-    src["_t_src"] = pd.to_datetime(src["_t_src"]).dt.as_unit("ns")
-    tt = pd.to_datetime(df[time_col]).dt.as_unit("ns")
+    if len(lags) != len(names):
+        raise ValueError("lags and names must have the same length")
+
+    work = pd.DataFrame({
+        "_row": np.arange(len(df), dtype=np.int64),
+        "_time": pd.to_datetime(df[time_col]).dt.as_unit("ns").to_numpy(),
+        "_tec": df[tec_col].to_numpy(),
+    })
+    if group_col is not None:
+        if group_col not in df.columns:
+            raise KeyError(f"TEC lag group column not found: {group_col}")
+        work["_group"] = df[group_col].astype("string").fillna("<missing>").to_numpy()
+    elif "source" in df.columns:
+        source = df["source"].astype("string")
+        # Monthly filenames such as GA_DNS_ACC_2015_03_v02 must all map to GA,
+        # rather than becoming separate groups at month boundaries.
+        satellite = source.str.extract(r"^([A-Za-z]{2})(?:_|-)", expand=False)
+        work["_group"] = satellite.fillna(source).fillna("<missing>").to_numpy()
+    else:
+        # Backwards-compatible single-series behaviour when track identity is
+        # genuinely unavailable. Production callers should retain ``source``.
+        work["_group"] = "<all>"
+
     for lag, name in zip(lags, names):
-        tgt = pd.DataFrame({"_t_lag": tt - pd.Timedelta(lag)}, index=df.index)
-        order = tgt["_t_lag"].sort_values(kind="mergesort").index
-        m = pd.merge_asof(tgt.loc[order], src,
-                          left_on="_t_lag", right_on="_t_src",
-                          direction="nearest", tolerance=pd.Timedelta(tolerance))
-        m.index = order
-        df[name] = m["_tec_src"].reindex(df.index)
+        values = np.full(len(df), np.nan, dtype=float)
+        for _, track in work.groupby("_group", sort=False, dropna=False):
+            src = (track.loc[track["_tec"].notna(), ["_time", "_tec"]]
+                   .rename(columns={"_time": "_t_src", "_tec": "_tec_src"})
+                   .sort_values("_t_src", kind="mergesort"))
+            if src.empty:
+                continue
+            tgt = track[["_row", "_time"]].copy()
+            tgt["_t_lag"] = tgt["_time"] - pd.Timedelta(lag)
+            tgt = tgt.sort_values("_t_lag", kind="mergesort")
+            matched = pd.merge_asof(
+                tgt[["_row", "_t_lag"]], src,
+                left_on="_t_lag", right_on="_t_src",
+                direction="nearest", tolerance=pd.Timedelta(tolerance),
+            )
+            values[matched["_row"].to_numpy(dtype=np.int64)] = matched["_tec_src"]
+        df[name] = values
     return df
