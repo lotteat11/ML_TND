@@ -40,8 +40,8 @@ AGU_STYLE = {
     "pdf.fonttype": 42, "ps.fonttype": 42,
 }
 
-REGIMES = [("quiet2009", "Quiet 2009"),
-           ("storm2015", "Storm 2015"),
+REGIMES = [("quiet2009", "2009"),
+           ("storm2015", "Period 2015"),
            ("post2016",  "Post-2016")]
 
 
@@ -87,8 +87,9 @@ def main():
             raise SystemExit(f"Not found: {pkl}")
         d, (m_all, p_all) = daily(pkl)
 
-        ax.plot(d.day, d.rl_msis, color=C_MSIS, lw=1.0, ls="--", label="MSIS")
-        ax.plot(d.day, d.rl_pred, color=C_PRED, lw=1.0, label="Prediction")
+        ax.plot(d.day, d.rl_msis, color=C_MSIS, lw=1.0, ls="--",
+                label="NRLMSIS-2.1")
+        ax.plot(d.day, d.rl_pred, color=C_PRED, lw=1.0, label="ML model")
         worse = d.rl_pred > d.rl_msis
         if args.losses:
             ax.fill_between(d.day, 0, 1, where=worse,

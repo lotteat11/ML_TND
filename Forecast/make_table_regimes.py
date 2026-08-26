@@ -33,8 +33,8 @@ METRIC_ROWS = [
 ]
 
 REGIME_LABELS = {
-    "quiet2009": "Quiet 2009",
-    "storm2015": "Storm 2015",
+    "quiet2009": "2009",
+    "storm2015": "Period 2015",
     "post2016":  "Post-2016",
     "pre2009":   "Pre-2009",
     "y2002":     "Solar max 2002",
@@ -81,7 +81,7 @@ def main():
     tex, txt = [], []
     tex.append(r"\begin{tabular}{lrrrl}")
     tex.append(r"\hline")
-    tex.append(r"\textbf{Metric} & \textbf{NRLMSISE-2.1} & \textbf{Predicted} "
+    tex.append(r"\textbf{Metric} & \textbf{NRLMSIS-2.1} & \textbf{ML model} "
                r"& \textbf{Diff (\%)} & \textbf{Training} \\")
     tex.append(r"\hline")
 
@@ -96,7 +96,7 @@ def main():
             head = f"{label} ({variant})"
             tex.append(rf"\textbf{{{head}}} & & & & \\")
             txt.append(f"\n{head}")
-            txt.append(f"  {'Metric':<22}{'MSIS':>14}{'Predicted':>14}{'Diff':>10}")
+            txt.append(f"  {'Metric':<22}{'MSIS':>14}{'ML model':>14}{'Diff':>10}")
             for lab, mcol, bcol, kind in METRIC_ROWS:
                 mv, bv = row.get(mcol), row.get(bcol)
                 tex.append(f"{lab} & {fmt(bv, kind)} & {fmt(mv, kind)} & "

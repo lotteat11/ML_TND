@@ -34,6 +34,9 @@ DEFAULT_RUN = ROOT / "runs_final_20250821"
 C_OBS = "#1a1a1a"
 C_PRED = "#e8762c"
 C_MSIS = "#3b8ede"
+# Second forecast lead, when one is overlaid: a purple that reads as distinct
+# from the orange prediction at line width, in colour and in greyscale.
+C_LEAD = "#8250c4"
 
 AGU_STYLE = {
     "font.family":       "sans-serif",
@@ -83,6 +86,10 @@ def main():
                    help="Draw one panel per day stacked vertically. A multi-day "
                         "window on a single axis crowds ~15 orbits per day into "
                         "one width and the curves stop being separable.")
+    p.add_argument("--overlay-lead", type=int, default=None,
+                   help="Draw a second forecast at this lead time alongside "
+                        "--lead, so the effect of lead time is visible in one "
+                        "panel (observations and MSIS do not depend on it).")
     p.add_argument("--lead", type=int, default=None,
                    help="For an h>1 run, keep only the forecasts at this lead "
                         "time in days (1 = made one day ahead). Without it "
@@ -100,13 +107,40 @@ def main():
     # consecutive blocks with identical time/lat and differing rho_pred. No
     # column records the lead, so it is recovered from the block order: the
     # last block reproduces the h=1 run exactly, hence block i is lead h - i.
-    if args.lead is not None:
+    extra_leads = {}
+    if args.lead is not None or args.overlay_lead is not None:
         horizon = int(args.tag.rsplit("_h", 1)[1])
-        if not 1 <= args.lead <= horizon:
-            raise SystemExit(f"--lead must be 1..{horizon} for {args.tag}")
-        blk = df.groupby(["t", "lat"]).cumcount()
-        keep = (blk % horizon) == (horizon - args.lead)
-        df = df[keep]
+        full = df
+        blk = full.groupby(["t", "lat"]).cumcount()
+
+        def _block(lead):
+            if not 1 <= lead <= horizon:
+                raise SystemExit(f"lead must be 1..{horizon} for {args.tag}")
+            # Always index the unfiltered frame: blk is aligned to it.
+            return full[(blk % horizon) == (horizon - lead)]
+
+        primary = args.lead if args.lead is not None else horizon
+        df = _block(primary)
+        if args.overlay_lead is not None:
+            # The blocks are not equal in length: epochs near the start and end
+            # of a period are covered by fewer than h rolling windows, so only
+            # the interior has every lead. Pair on (t, lat, occurrence) and keep
+            # the epochs both leads cover, rather than aligning by position.
+            def _keyed(frame):
+                k = frame.groupby(["t", "lat"]).cumcount()
+                return frame.assign(_k=k).set_index(["t", "lat", "_k"])
+
+            a, b = _keyed(df), _keyed(_block(args.overlay_lead))
+            common = a.index.intersection(b.index)
+            dropped = len(a) - len(common)
+            if dropped:
+                print(f"  overlay: {dropped:,} epochs lack a lead "
+                      f"{args.overlay_lead} forecast and are dropped")
+            df = a.loc[common].copy()
+            df[f"rho_pred_lead{args.overlay_lead}"] = b.loc[common, "rho_pred"]
+            df = df.reset_index()
+            extra_leads[args.overlay_lead] = None
+        args.lead = primary
 
     day = pd.Timestamp(args.date, tz="UTC")
     lo = day + pd.Timedelta(hours=args.hours[0])
@@ -126,6 +160,10 @@ def main():
     obs = d["rho_obs"].to_numpy()
     scores = {"MSIS": rmse_log(obs, d["msis_rho"].to_numpy()),
               "Corrected": rmse_log(obs, d["rho_pred"].to_numpy())}
+    for lead in extra_leads:
+        col = d[f"rho_pred_lead{lead}"]
+        scores[f"lead {lead} d"] = rmse_log(obs[col.notna().to_numpy()],
+                                            col.dropna().to_numpy())
     print(f"{pkl}\n  {len(d):,} samples, {d.t.min()} .. {d.t.max()}")
     for k, v in scores.items():
         print(f"  RMSE(log) {k:10s} {v:.4f}  (factor {np.exp(v):.2f})")
@@ -157,8 +195,10 @@ def main():
 
     # Shared y-limits keep the panels comparable; without them each day is
     # autoscaled and a quiet day looks as active as a storm.
-    ymax = max(d["rho_obs"].max(), d["rho_pred"].max(), d["msis_rho"].max())
-    ymin = min(d["rho_obs"].min(), d["rho_pred"].min(), d["msis_rho"].min())
+    _ycols = ["rho_obs", "rho_pred", "msis_rho"] + [
+        f"rho_pred_lead{lead}" for lead in extra_leads]
+    ymax = max(d[c].max() for c in _ycols)
+    ymin = min(d[c].min() for c in _ycols)
 
     for i, (ax, (s, e)) in enumerate(zip(axes, spans)):
         w = d[(d["t"] >= s) & (d["t"] < e)]
@@ -166,17 +206,23 @@ def main():
         # the labels are read at figure size, where a 3-decimal metric is noise.
         ax.plot(w["t"], w["rho_obs"], color=C_OBS, lw=0.7, label="Observed",
                 zorder=4)
-        ax.plot(w["t"], w["rho_pred"], color=C_PRED, lw=1.0, label="Prediction",
+        pred_label = ("ML model" if not extra_leads
+                      else f"ML model ({args.lead} d lead)")
+        ax.plot(w["t"], w["rho_pred"], color=C_PRED, lw=1.0, label=pred_label,
                 zorder=3)
+        for lead in extra_leads:
+            ax.plot(w["t"], w[f"rho_pred_lead{lead}"], color=C_LEAD, lw=1.0,
+                    label=f"ML model ({lead} d lead)", zorder=3)
         ax.plot(w["t"], w["msis_rho"], color=C_MSIS, lw=1.0, ls="--",
-                label="MSIS", zorder=2)
+                label="NRLMSIS-2.1", zorder=2)
 
         ax.set_ylabel(r"$\rho$  [kg m$^{-3}$]")
         ax.set_ylim(ymin - 0.04 * (ymax - ymin), ymax + 0.26 * (ymax - ymin))
         # Headroom above carries the legend, so only the top panel needs one.
         if i == 0:
             ax.legend(loc="upper right", frameon=False, handlelength=1.8,
-                      ncol=3, columnspacing=1.2, borderaxespad=0.2)
+                      ncol=3 + len(extra_leads), columnspacing=1.2,
+                      borderaxespad=0.2)
         ax.tick_params(length=2.5, pad=2)
         ax.grid(True, axis="y", alpha=0.25, lw=0.5)
         ax.set_axisbelow(True)

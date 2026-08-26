@@ -94,7 +94,7 @@ def build_table(df: pd.DataFrame, label_col: str, label_head: str, label_fmt,
 
     if baseline is not None:
         lines.append(r"    \hline")
-        cells = ["NRLMSISE-00"]
+        cells = ["NRLMSIS-2.1"]
         cells += [fmt(baseline[key]) for key, _, fmt in COLUMNS]
         lines.append("    " + " & ".join(cells) + r" \\")
 

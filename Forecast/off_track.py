@@ -463,9 +463,24 @@ def predict_density(df: pd.DataFrame, model, scaler_y, X: pd.DataFrame) -> pd.Da
 # ------------------------------
 # Plotting (kept as functions and only called if enabled)
 # ------------------------------
+def _savefig_both(save_path, **kwargs):
+    """Write the current figure as PNG and PDF.
+
+    save_path is given without an extension, so matplotlib would default to
+    PNG alone; the manuscript needs the vector copy alongside it.
+    """
+    # pyplot is imported per-function throughout this module, so import it
+    # here too rather than relying on a module-level name.
+    import matplotlib.pyplot as plt
+
+    base = os.path.splitext(str(save_path))[0]
+    for ext in ("png", "pdf"):
+        plt.savefig(f"{base}.{ext}", **kwargs)
+
+
 def plot_msis_global(df: pd.DataFrame, lon_col="longitude", lat_col="latitude", value_col="msis_rho",
                       res_deg=5, cmap="turbo", title=None, save_path = "plot_gloval",
-                      vmin=None, vmax=None): # <-- New Parameters Added Here
+                      vmin=None, vmax=None):
 
     import matplotlib.pyplot as plt
     import cartopy.crs as ccrs
@@ -482,19 +497,20 @@ def plot_msis_global(df: pd.DataFrame, lon_col="longitude", lat_col="latitude", 
     lat_edges = np.arange(-90, 90 + res_deg, res_deg)
     lon_idx = np.digitize(lon, lon_edges) - 1
     lat_idx = np.digitize(lat, lat_edges) - 1
-    grid = np.full((len(lat_edges)-1, len(lon_edges)-1), np.nan)
-    count = np.zeros_like(grid)
-
-    for i, j, v in zip(lat_idx, lon_idx, values):
-        if 0 <= i < grid.shape[0] and 0 <= j < grid.shape[1]:
-            if np.isnan(grid[i, j]):
-                grid[i, j] = v
-            else:
-                grid[i, j] += v
-            count[i, j] += 1
-
+    ny, nx = len(lat_edges) - 1, len(lon_edges) - 1
+    # Vectorised bin-average. The previous Python loop over every grid point
+    # cost ~3.5M iterations per panel, which is what made a fine res_deg
+    # impractical; bincount makes the cost independent of the resolution.
+    inside = ((lat_idx >= 0) & (lat_idx < ny) &
+              (lon_idx >= 0) & (lon_idx < nx))
+    flat = (np.asarray(lat_idx)[inside] * nx + np.asarray(lon_idx)[inside])
+    total = np.bincount(flat, weights=np.asarray(values)[inside], minlength=ny * nx)
+    count = np.bincount(flat, minlength=ny * nx).astype(float)
+    grid = np.full(ny * nx, np.nan)
     mask = count > 0
-    grid[mask] /= count[mask]
+    grid[mask] = total[mask] / count[mask]
+    grid = grid.reshape(ny, nx)
+    count = count.reshape(ny, nx)
 
     lon_c = (lon_edges[:-1] + lon_edges[1:]) / 2
     lat_c = (lat_edges[:-1] + lat_edges[1:]) / 2
@@ -508,20 +524,20 @@ def plot_msis_global(df: pd.DataFrame, lon_col="longitude", lat_col="latitude", 
     ax.add_feature(cfeature.BORDERS, linewidth=0.3, alpha=0.5)
     ax.gridlines(draw_labels=False, linewidth=0.3, alpha=0.35)
 
-    # --- Key Change: Pass vmin and vmax to pcolormesh ---
     h = ax.pcolormesh(
         Lon, Lat, grid,
         transform=ccrs.PlateCarree(),
         cmap=cmap,
-        vmin=vmin,  # <--- Sets the minimum for the color scale
+        vmin=vmin,
         vmax=vmax,
-       # shading="gouraud",   #
     )
-    # --------------------------------------------------
 
-    plt.colorbar(h, ax=ax, shrink=0.7, pad=0.03, label="MSIS Neutral Density (kg/m³)")
+    # The label follows the column: this function draws the prediction panel
+    # too, where "MSIS" would be wrong.
+    plt.colorbar(h, ax=ax, shrink=0.7, pad=0.03,
+                 label="Neutral density (kg m$^{-3}$)")
     ax.set_title(title or "MSIS Neutral Density Global Map", pad=8)
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    _savefig_both(save_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
     plt.show()
 
@@ -568,8 +584,7 @@ def plot_difference_global(df: pd.DataFrame, lon_col="longitude", lat_col="latit
     h = ax.pcolormesh(Lon, Lat, grid, transform=ccrs.PlateCarree(), cmap=cmap)
     plt.colorbar(h, ax=ax, shrink=0.7, pad=0.03, label="Difference (rho_pred - msis_rho) [kg/m³]")
     ax.set_title(title or "Global Difference: Predicted vs MSIS", pad=8)
-    plt.show() 
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    _savefig_both(save_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
 
 def compute_swarm_diffs_hourly_mean(result_df, scaled_swarm_row, cfg: Config):
@@ -743,14 +758,14 @@ def plot_swarm_point_diffs_on_map(result_df, diffs_df, which='pred', title=None,
 
     ax.set_title(title or default_title, pad=8)
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        _savefig_both(save_path, dpi=300, bbox_inches='tight')
     plt.show()
     plt.close(fig)  
 
 
 
 def plot_swarm_track_with_line(result_df, swarm_df, value_col="rho_obs_scaled_to_tgt", val="rho_pred",
-                               title=None, save_path=None, s=20):
+                               title=None, save_path=None, s=20, smooth_sigma=0.0):
   
 
     """
@@ -795,6 +810,30 @@ def plot_swarm_track_with_line(result_df, swarm_df, value_col="rho_obs_scaled_to
             count[i, j] += 1
     mask = count > 0
     grid[mask] /= count[mask]
+
+    # Optional display-only smoothing. Longitude wraps at the dateline, while
+    # latitude is reflected at the poles.
+    if smooth_sigma and smooth_sigma > 0:
+        from scipy.ndimage import gaussian_filter
+
+        valid = np.isfinite(grid)
+        weighted_values = gaussian_filter(
+            np.where(valid, grid, 0.0),
+            sigma=smooth_sigma,
+            mode=("reflect", "wrap"),
+        )
+        weights = gaussian_filter(
+            valid.astype(float),
+            sigma=smooth_sigma,
+            mode=("reflect", "wrap"),
+        )
+        grid = np.divide(
+            weighted_values,
+            weights,
+            out=np.full_like(weighted_values, np.nan),
+            where=weights > 1e-12,
+        )
+
     Lon, Lat = np.meshgrid((lon_edges[:-1] + lon_edges[1:]) / 2,
                             (lat_edges[:-1] + lat_edges[1:]) / 2)
 
@@ -836,7 +875,7 @@ def plot_swarm_track_with_line(result_df, swarm_df, value_col="rho_obs_scaled_to
 
     ax.set_title(title or "Swarm Track with Unified Colorbar", pad=8)
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        _savefig_both(save_path, dpi=300, bbox_inches="tight")
     plt.show()
     plt.close(fig)
 
@@ -1133,7 +1172,7 @@ def plot_swarm_track_with_line2(
 
     # Save OR show, then close
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        _savefig_both(save_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
         if verbose:
             print(f"\nSaved figure to: {save_path}")
@@ -1212,10 +1251,10 @@ def main(cfg: Config = Config()):
     # 8) Plot (optional)
     if cfg.plot_results:
         try:
-            plot_msis_global(result_df, title=f"Rho msis {alt_km:.0f} km", value_col="msis_rho", save_path = "plot_grace_globalmsis", vmin=1E-12, vmax=6E-12)
-            plot_msis_global(result_df, title=f"Rho pred {alt_km:.0f} km", value_col="rho_pred", save_path = "plot_grace_pred", vmin=1E-12, vmax=6E-12)
+            plot_msis_global(result_df, title="NRLMSIS-2.1", value_col="msis_rho", save_path = "plot_grace_globalmsis", vmin=1E-12, vmax=6E-12)
+            plot_msis_global(result_df, title="ML model", value_col="rho_pred", save_path = "plot_grace_pred", vmin=1E-12, vmax=6E-12)
            
-            plot_difference_global(result_df, title="Predicted - MSIS Difference")
+            plot_difference_global(result_df, title="ML model − NRLMSIS-2.1")
         except Exception as e:
             print(f"Plotting skipped due to error: {e}")
 
@@ -1309,17 +1348,19 @@ def main(cfg: Config = Config()):
                 result_df=result_df,          # Background prediction grid
                 swarm_df=scaled_swarm,        # Swarm scaled data
                 value_col="rho_obs_scaled_to_tgt",  # Color by scaled density
-                title=f"Swarm Track at {alt_km:.0f} km",
-                save_path="plot_swarm_global_scale_line_pred", 
+                title="ML model + Swarm",
+                save_path="plot_swarm_global_scale_line_pred",
                 val="rho_pred",
+                smooth_sigma=1.0,
             )
             plot_swarm_track_with_line(
                 result_df=result_df,          # Background prediction grid
                 swarm_df=scaled_swarm,        # Swarm scaled data
                 value_col="rho_obs_scaled_to_tgt",  # Color by scaled density
-                title=f"Swarm Track at {alt_km:.0f} km",
-                save_path="plot_swarm_global_scale_line_msis", 
+                title="NRLMSIS-2.1 + Swarm",
+                save_path="plot_swarm_global_scale_line_msis",
                 val="msis_rho",
+                smooth_sigma=1.0,
             )
             #plot_difference_global(result_df, title="Predicted - MSIS Difference")
         except Exception as e:
@@ -1365,7 +1406,7 @@ def main(cfg: Config = Config()):
                     result_df=result_df2,                 # background: CORE grid
                     swarm_df=grace_last5,               # using GRACE points (no scaling)
                     value_col="rho_obs",                # color by raw GRACE density
-                    title=f"GRACE Track (last 1 days) over CORE Prediction ({alt_km:.0f} km)",
+                    title="Core ML model + GRACE",
                     save_path="plot_grace_last1_on_core",
                     val="rho_pred",
                     s=4                      # background field from CORE

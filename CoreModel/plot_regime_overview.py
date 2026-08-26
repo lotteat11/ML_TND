@@ -46,8 +46,8 @@ AGU_STYLE = {
 }
 
 TITLES = {
-    "quiet2009": "Quiet 2009 (deep solar minimum)",
-    "storm2015": "March 2015 G4 storm window",
+    "quiet2009": "2009 (deep solar minimum)",
+    "storm2015": "Period 2015 (March 2015 G4 storm window)",
     "post2016":  "Post-2016 holdout",
 }
 
@@ -108,8 +108,9 @@ def main():
     a1.fill_between(d.day, d.lo, d.hi, color=C_OBS, alpha=0.12, lw=0,
                     label="Observed 10–90 %")
     a1.plot(d.day, d.obs,  color=C_OBS,  lw=0.9, label="Observed", zorder=4)
-    a1.plot(d.day, d.pred, color=C_PRED, lw=1.1, label="Prediction", zorder=3)
-    a1.plot(d.day, d.msis, color=C_MSIS, lw=1.1, ls="--", label="MSIS", zorder=2)
+    a1.plot(d.day, d.pred, color=C_PRED, lw=1.1, label="ML model", zorder=3)
+    a1.plot(d.day, d.msis, color=C_MSIS, lw=1.1, ls="--", label="NRLMSIS-2.1",
+            zorder=2)
     a1.set_yscale("log")
     a1.set_ylabel(r"daily median $\rho$  [kg m$^{-3}$]")
     a1.legend(loc="upper left", frameon=False, ncol=4, handlelength=1.8,
@@ -119,8 +120,8 @@ def main():
                  f"{100*(overall_p/overall_m-1):+.0f}%)", pad=6)
 
     # (b) daily skill
-    a2.plot(d.day, d.rl_msis, color=C_MSIS, lw=1.0, ls="--", label="MSIS")
-    a2.plot(d.day, d.rl_pred, color=C_PRED, lw=1.0, label="Prediction")
+    a2.plot(d.day, d.rl_msis, color=C_MSIS, lw=1.0, ls="--", label="NRLMSIS-2.1")
+    a2.plot(d.day, d.rl_pred, color=C_PRED, lw=1.0, label="ML model")
     worse = d.rl_pred > d.rl_msis
     a2.fill_between(d.day, 0, 1, where=worse, transform=a2.get_xaxis_transform(),
                     color=C_BAD, alpha=0.12, lw=0)

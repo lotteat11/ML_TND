@@ -31,8 +31,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RUN = ROOT / "runs_final_20250821"
 
-REGIMES = [("quiet2009", "Quiet 2009"),
-           ("storm2015", "Storm 2015"),
+REGIMES = [("quiet2009", "2009"),
+           ("storm2015", "Period 2015"),
            ("post2016", "Post-2016")]
 
 C_MSIS = "#2e8b57"
@@ -86,7 +86,7 @@ def panel(ax, d, title, max_points, rng, scale="linear", clip=None, top=None):
     ax.scatter(o, m, s=.7, alpha=.10, c=C_MSIS, linewidths=0, rasterized=True,
                label="NRLMSIS-2.1")
     ax.scatter(o, p, s=.7, alpha=.10, c=C_PRED, linewidths=0, rasterized=True,
-               label="Corrected")
+               label="ML model")
 
     if scale == "log":
         lo = float(np.percentile(obs, 0.2))
