@@ -7,7 +7,7 @@
 #                                       holdouts: quiet-2009, post-2016)
 #   ./run_pipeline.sh storm [stages]    as 'new', plus the Mar-2015 G4 storm
 #                                       held out of training and evaluated
-#   ./run_pipeline.sh old  [stages]     published setup (train 2009-2016,
+#   ./run_pipeline.sh old  [stages]     restricted setup (train 2009-2016,
 #                                       holdouts: pre-2009, post-2016)
 #
 # stages: comma-separated subset of  dns,tec,msis,merge,train,eval,ontrack
@@ -17,10 +17,10 @@
 #
 # Notes:
 #   - 'tec' needs an Earthdata login in ~/.netrc (CDDIS).
-#   - 'new' downloads ~3 GB of GRACE zips on first run; TEC IONEX files are
-#     shared with the old setup's folder, so only 2002-2008 is fetched anew.
-#   - Nothing from the published setup is overwritten: 'new' writes *_v5_full
-#     model/scaler files, its own parquets, and runs_full/.
+#   - 'new' downloads ~3 GB of GRACE zips on first run; both setups share one
+#     TEC IONEX folder, so only 2002-2008 is fetched on top of 'old'.
+#   - The two setups write separate artifacts and never overwrite each other:
+#     'new' writes *_v5_full model/scaler files, its own parquets, runs_full/.
 # =============================================================================
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -97,8 +97,8 @@ case "$MODE" in
 
     # ---- rolling out-of-sample evaluation: held-out regimes ----
     # Warm-start lookback: days of history each rolling step fine-tunes on.
-    # Pinned here because on_track.py's own default (14) is not the value the
-    # reported results use.
+    # Pinned here so the pipeline reproduces the reported results regardless
+    # of on_track.py's own default.
     #
     # Aggregate skill is nearly flat over 3-7 days, with longer marginally
     # better in quiet conditions. 3 is chosen for transition behaviour: a

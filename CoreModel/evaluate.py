@@ -122,10 +122,10 @@ if __name__ == "__main__":
     val_metrics  = plot_val_densities_with_metrics(df_val,  sample_step=SAMPLE_STEP)
     test_metrics = _score_split(df_test, sample_step=SAMPLE_STEP)
 
-    # 6b. Persist val AND test metrics. They used to exist only as text baked
-    # into the parity-plot labels, so quoting r (or any of them) meant reading a
-    # number off a PNG — and the test split was predicted but never scored in
-    # physical space at all. Written next to the model so the file names the run.
+    # 6b. Persist val AND test metrics to CSV rather than leaving them as text
+    # baked into the parity-plot labels, so that quoting any of them does not
+    # mean reading a number off a PNG. Written next to the model so the file
+    # names the run.
     metrics_csv = os.environ.get(
         "EVAL_METRICS_CSV",
         f"eval_metrics_{os.path.splitext(os.path.basename(str(MODEL_OUT)))[0]}.csv",

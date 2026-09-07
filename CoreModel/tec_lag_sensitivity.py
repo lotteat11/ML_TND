@@ -65,7 +65,7 @@ def arguments():
     parser.add_argument("--split-mode", choices=("time", "rows"), default="time",
                         help="'time' cuts blocks on real time so GA and GB stay "
                              "together and gaps are real quiet periods; 'rows' "
-                             "reproduces the historical row-position split.")
+                             "splits on row position instead.")
     parser.add_argument("--gap-time", default="3d",
                         help="Quiet period between blocks for --split-mode time.")
     parser.add_argument("--max-rows", type=int, default=0,
@@ -349,9 +349,9 @@ def split_data(df, args):
 # CONSTANT rate of 0.05 (decay 1.0), which is the setting the 2002-2004 grid
 # sweep was run under and the one its conclusions rest on -- a decaying rate
 # would make new runs incomparable with those results.  A decay schedule is
-# still available via --lr-decay/--lr-step; note that decaying every 15 rounds
-# drives the rate to ~5e-5 by round 800, so past roughly round 500 the model
-# stops learning and a large --rounds buys nothing.
+# still available via --lr-decay/--lr-step. Decaying every 15 rounds drives
+# the rate to ~5e-5 by round 800, so past roughly round 500 the model stops
+# learning and a large --rounds buys nothing.
 LR_INITIAL = 0.05
 LR_DECAY = 1.0
 LR_STEP = 40

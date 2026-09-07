@@ -1,9 +1,8 @@
 # Author: Lotte Ansgaard Thomsen
 # Aalborg University
 """
-GettingData.py
-- Downloads GRACE or Swarm DNS files from the TU Delft HTTPS data service
-  (the old FTP server has been retired and now returns empty listings).
+download_dns.py
+- Downloads GRACE or Swarm DNS files from the TU Delft HTTPS data service.
 - Parses the ASCII text format and stacks all years into one dataframe.
 - Saves the result as a single parquet file.
 """

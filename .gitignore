@@ -2,6 +2,7 @@
 ven_2404/
 venv/
 .venv/
+.venv-plot/
 env/
 
 # Python cache

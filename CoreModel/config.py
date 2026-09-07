@@ -45,8 +45,8 @@ _lags = os.environ.get("TEC_LAGS", "3h")
 TEC_LAGS     = tuple(x.strip() for x in _lags.split(",") if x.strip())
 if not TEC_LAGS:
     raise ValueError("TEC_LAGS must name at least one lag, e.g. '3h,24h'")
-# Column names are positional and historical: the first lag is
-# vtec_matched_lag, the second vtec_matched_lag2, and so on.
+# Column names are positional: the first lag is vtec_matched_lag, the second
+# vtec_matched_lag2, and so on.
 TEC_LAG_COLS = tuple("vtec_matched_lag" + ("" if i == 0 else str(i + 1))
                      for i in range(len(TEC_LAGS)))
 # Kept for callers that assume a single lag.

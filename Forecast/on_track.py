@@ -34,10 +34,9 @@ from config import FEATURES, COLS_TO_SCALE, TEC_LAGS, TEC_LAG_COLS
 # Turn plotting on/off for the initial MSIS vs Observed plot (not essential for batch runs)
 PLOT = False
 
-# The day for which you want to save an exact model snapshot during the rolling loop
-# Set to any date present in your dataset; example kept from your original file.
-# (You can change this freely.)
-#DATE_TO_SAVE_MODEL = pd.to_datetime("2016-02-18").date()
+# Day on which the fine-tuned model is snapshotted to disk during the rolling
+# loop. off_track.py loads that snapshot for the global grid prediction, so
+# this must be a date inside the evaluated period.
 DATE_TO_SAVE_MODEL = pd.to_datetime("2009-01-13").date()
 
 
@@ -116,8 +115,8 @@ if RESET_EVERY < 1:
     raise ValueError("ONTRACK_RESET_EVERY must be >= 1")
 
 # Tree shape for the trees warm-start ADDS. Without this the new trees fall
-# back to XGBoost load defaults and no longer match the base model, so the
-# tuned search is defaulted here rather than left to the caller.
+# back to XGBoost load defaults, which do not match the base model, so the
+# tuned search result is defaulted here rather than left to the caller.
 ONTRACK_PARAMS_JSON = os.environ.get(
     "ONTRACK_PARAMS_JSON", "tuning_v13_tec3h_depth3_10/best_params.json").strip()
 ONTRACK_TREE_PARAMS = None
@@ -162,7 +161,7 @@ def _utc(value: str) -> pd.Timestamp:
 
 
 def _filters_for_regime(date_filter: str):
-    """Arrow filters matching the historical in-memory date cuts."""
+    """Arrow filters for each regime's date cuts, applied at read time."""
     filters = {
         "pre2009": [("grace_time", "<", _utc("2009-06-06"))],
         "post2016": [("grace_time", ">", _utc("2016-01-01"))],
@@ -235,11 +234,10 @@ def update_xgb_model_aggressive_with_callbacks(
     tree_params: dict | None = None
 ):
     """
-    Aggressive update:
-    - Uses EarlyStopping + LR scheduler
-    - Returns the BEST booster (not the last)
-    - Ensures next step starts from best checkpoint
-    (Code adapted directly from your original file.)
+    One warm-start update on the most recent observations:
+    - Fine-tunes with early stopping and the decaying LR schedule
+    - Returns the booster with the lowest validation RMSE, not the last one,
+      so the next update begins from the best checkpoint
     """
     # 1) Data Preparation and Splitting
     new_data = new_data.sort_values(by=['date', 'time']).reset_index(drop=True)

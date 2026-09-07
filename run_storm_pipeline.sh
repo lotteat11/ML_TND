@@ -1,11 +1,11 @@
 #!/bin/bash
 # =============================================================================
 # run_storm_pipeline.sh — train + evaluate the storm-holdout setup end to end,
-# then print the March-2015 report. Chains the three commands used to test
-# the March-2015 holdout, so the whole thing can run unattended overnight.
+# then print the March-2015 report. Chains training, the rolling evaluation
+# and the report, so the whole experiment can run unattended overnight.
 #
 # Usage:
-#   ./run_storm_pipeline.sh                 # 15 features, train includes 2002, h1 only
+#   ./run_storm_pipeline.sh                 # default: 17 features, train includes 2002, h1 only
 #   AP_HISTORY=1 ./run_storm_pipeline.sh    # + ap storm-history features, train includes 2002, h1 only
 #   ONTRACK_HORIZONS=1,3 ./run_storm_pipeline.sh  # explicitly run h1 and h3
 #   USE_TUNED=1 ./run_storm_pipeline.sh     # tuned hyperparameters

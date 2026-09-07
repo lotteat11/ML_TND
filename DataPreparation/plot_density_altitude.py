@@ -138,35 +138,39 @@ def format_time_axis(ax: plt.Axes) -> None:
     ax.tick_params(axis="x", rotation=35)
 
 
+def _save_both(fig, output: Path) -> None:
+    """Write the figure as PNG and PDF; the manuscript needs the vector copy."""
+    for suffix in (".png", ".pdf"):
+        fig.savefig(output.with_suffix(suffix), bbox_inches="tight")
+
+
 def plot_density(weekly: pd.DataFrame, output: Path) -> None:
     fig, ax = plt.subplots(figsize=(8.5 / 2.54, 6 / 2.54))
-    ax.plot(weekly.index, weekly["rho_obs"] / 1e-12, color="#0072B2", label="Observed Density")
+    ax.plot(weekly.index, weekly["rho_obs"] / 1e-12, color="#0072B2", label="Observed")
     ax.plot(
         weekly.index,
         weekly["msis_rho"] / 1e-12,
         color="#009E73",
         linestyle="--",
-        label="MSIS Model",
+        label="NRLMSIS-2.1",
     )
-    ax.set_title("Observed vs MSIS Density (Weekly Average)")
     ax.set_xlabel("Time [Year]")
     ax.set_ylabel(r"Density [$10^{-12}$ kg/m$^3$]")
     ax.legend(frameon=False)
     format_time_axis(ax)
     fig.tight_layout()
-    fig.savefig(output, bbox_inches="tight")
+    _save_both(fig, output)
     plt.close(fig)
 
 
 def plot_altitude(altitude: pd.DataFrame, output: Path) -> None:
     fig, ax = plt.subplots(figsize=(8.5 / 2.54, 6 / 2.54))
     ax.plot(altitude["time"], altitude["alt_km"], color="#0072B2", linewidth=0.65)
-    ax.set_title("Observed Altitude Over Time")
     ax.set_xlabel("Time [Year]")
     ax.set_ylabel("Altitude [km]")
     format_time_axis(ax)
     fig.tight_layout()
-    fig.savefig(output, bbox_inches="tight")
+    _save_both(fig, output)
     plt.close(fig)
 
 
@@ -192,8 +196,9 @@ def main() -> None:
     apply_agu_style()
     plot_density(weekly, density_output)
     plot_altitude(altitude, altitude_output)
-    print(f"Saved: {density_output}")
-    print(f"Saved: {altitude_output}")
+    for output in (density_output, altitude_output):
+        for suffix in (".png", ".pdf"):
+            print(f"Saved: {output.with_suffix(suffix)}")
 
 
 if __name__ == "__main__":

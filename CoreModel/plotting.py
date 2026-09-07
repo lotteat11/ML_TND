@@ -117,7 +117,7 @@ def plot_val_densities_with_metrics(
     """Time-series and parity plot comparing observed, MSIS, and predicted density.
 
     Returns the metrics dict ({"MSIS": {...}, "Pred": {...}}) so callers can
-    persist them; they were previously only rendered into the parity labels.
+    persist them rather than only reading them off the parity labels.
     """
     d = df_val[[time_col, obs_col, msis_col, pred_col]].dropna().copy()
     if sample_step > 1:

@@ -3,7 +3,7 @@
 """
 lookback_tables_latex.py
 - Turns the CSVs written by Forecast/tune_lookback.py into LaTeX tables ready to
-  paste into the thesis.
+  paste into the manuscript.
 - Emits two tables: the lookback sensitivity sweep and the reset-cadence sweep.
 - The bias column is dropped on purpose; it is not reported anywhere else in the
   text, so carrying it here would be the only place a reader meets it.
@@ -127,7 +127,7 @@ if __name__ == "__main__":
     reset_df = pd.read_csv(reset_csv)
     reset_lookback = int(reset_df["lookback_days"].iloc[0])
 
-    # n is no longer a column, so the matched row count moves into the caption:
+    # The matched row count belongs in the caption rather than as a column:
     # it is what makes the comparison valid and should not be lost.
     n_rows = sorted(set(lookback_df["n"]) | set(reset_df["n"]))
     if len(n_rows) != 1:

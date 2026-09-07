@@ -2,9 +2,9 @@
 # Aalborg University
 """
 check_lst.py
-- Loads the new full-mission article dataset with the same feature settings as
-  the model, runs the cyclic time-block split, and reports coverage for LST,
-  F10.7, and Ap.
+- Loads the full-mission dataset with the same feature settings as the model,
+  runs the cyclic time-block split, and reports coverage for LST, F10.7, and
+  Ap.
 - Exports both the complete min--max range and the descriptive P5--P95 interval;
   no distribution tails are removed.
 
@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input", type=Path,
         default=Path(__file__).resolve().parent.parent / "grace_data_merged_v5_full.parquet",
-        help="Merged model dataset (default: new full-mission v5 dataset).",
+        help="Merged model dataset (default: the full-mission dataset).",
     )
     parser.add_argument("--start", default="2002-01-01", help="Exclusive model-period start.")
     parser.add_argument("--end", default="2016-01-01", help="Exclusive model-period end.")

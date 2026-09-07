@@ -2,11 +2,10 @@
 # Aalborg University
 """
 make_table_storm.py
-Reports the March-2015 G4 storm evaluation from runs_v6_storm/, and compares the
-2002 / quiet-2009 control regimes against the earlier run to show the extra
-interior holdout did not change them.
+Reports the March-2015 G4 storm evaluation, alongside the 2002 and quiet-2009
+control regimes.
 
-The rolling protocol needs a lead-in (5 fine-tuning days) and therefore runs
+The rolling protocol needs a lead-in of fine-tuning days and therefore runs
 over the whole 1 Mar - 15 Apr 2015 holdout window, but the storm itself is
 reported on the G4 main-phase days only (17-18 March by default). Those rows
 are sliced from the saved predictions -- no re-run needed.

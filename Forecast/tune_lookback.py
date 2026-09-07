@@ -88,7 +88,7 @@ DATA_FILE     = os.environ.get("ONTRACK_DATA_FILE",
 OUTPUT_DIR = os.environ.get("LOOKBACK_OUTPUT_DIR", "lookback_sensitivity")
 
 # Tuned tree shape for the trees warm-start ADDS. Without this the new trees
-# fall back to XGBoost load defaults and no longer match the base model, which
+# fall back to XGBoost load defaults, which do not match the base model and
 # would confound the lookback comparison.
 PARAMS_JSON = os.environ.get("ONTRACK_PARAMS_JSON",
                              "tuning_v13_tec3h_depth3_10/best_params.json")
@@ -345,7 +345,7 @@ if __name__ == "__main__":
             f"  model wants, config does not build: {missing}\n"
             f"  config builds, model does not want: {extra}\n"
             f"  scaler/config disagree on scaled cols: {scale_mismatch}\n"
-            f"  Hint: the v8_storm_ap model needs TEC_LAGS=3h."
+            f"  The v8_storm_ap model was fitted with TEC_LAGS=3h."
         )
 
     # Gate every lookback on the longest one so all of them forecast exactly
