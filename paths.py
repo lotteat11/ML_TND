@@ -41,13 +41,13 @@ SWARM_MSIS = ROOT / "swarm_dns_with_tnd_y2001516_v1_0309.parquet"
 GRACE_MERGED = ROOT / "grace_data_merged_v3.parquet"
 
 # ---------------------------------------------------------------------------
-# Workshop dataset (50% sample for easier Colab uploads via Git LFS)
-# ---------------------------------------------------------------------------
-GRACE_WORKSHOP = ROOT / "grace_workshop_small.parquet"
-
-# ---------------------------------------------------------------------------
 # Model artifacts (pipeline step 5)
 # ---------------------------------------------------------------------------
 MODEL    = ROOT / "xgb_model_v3.json"
 SCALER_X = ROOT / "scaler_xgboost_X_v3.joblib"
 SCALER_Y = ROOT / "scaler_xgboost_y_v3.joblib"
+
+# ---------------------------------------------------------------------------
+# Workshop dataset (50% sample, sized for Colab uploads via Git LFS)
+# ---------------------------------------------------------------------------
+GRACE_WORKSHOP = ROOT / "grace_workshop_small.parquet"

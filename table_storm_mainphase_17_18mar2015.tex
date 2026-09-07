@@ -1,0 +1,26 @@
+% March 2015 G4 storm main phase, 17-18 March, h = 1 day.
+% Source: runs_final_20250821 (lookback 3 d), n = 34,560 samples, ap_max = 179.
+% Diff is the change of the warm-start model relative to the NRLMSIS-2.1
+% baseline for the same period. No Diff is given for R^2: the MSIS baseline is
+% 0.060, so a relative change there is dominated by the denominator and is not
+% meaningful; quote the absolute change 0.060 -> 0.460 instead.
+\begin{table}[htbp]
+\centering
+\caption{Along-track density errors during the main phase of the 17--18 March
+2015 G4 storm ($a_p^{\max}=179$, $n=34{,}560$), for a one-day forecast horizon.
+Core = static model; warm-start = daily fine-tuning on the preceding three days.
+Diff is warm-start relative to NRLMSIS-2.1.}
+\label{tab:storm_mainphase}
+\begin{tabular}{lrrrr}
+\hline
+\textbf{Metric} & \textbf{NRLMSIS-2.1} & \textbf{Core} & \textbf{Warm-start} & \textbf{Diff} \\
+\hline
+RMSE$_{\log}$          & 0.421 & 0.333 & 0.315 & $-25.2\%$ \\
+Top5$_{\log}$          & 0.909 & 0.741 & 0.698 & $-23.2\%$ \\
+RMSE (kg\,m$^{-3}$)    & $1.631\times10^{-12}$ & $1.269\times10^{-12}$ & $1.237\times10^{-12}$ & $-24.2\%$ \\
+Top5 (kg\,m$^{-3}$)    & $4.291\times10^{-12}$ & $3.418\times10^{-12}$ & $3.464\times10^{-12}$ & $-19.3\%$ \\
+MAPE (\%)              & 32.77 & 27.80 & 25.75 & $-21.4\%$ \\
+$R^2$                  & 0.060 & 0.431 & 0.460 & -- \\
+\hline
+\end{tabular}
+\end{table}

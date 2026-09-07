@@ -44,14 +44,15 @@ except ImportError:
 # ----------------------------
 # ======= Configuration =======
 # ----------------------------
-START_YEAR = 2009
-END_YEAR   = 2017
+# Defaults below can be overridden via environment variables (see run_pipeline.sh)
+START_YEAR = int(os.environ.get("TEC_START_YEAR", 2009))
+END_YEAR   = int(os.environ.get("TEC_END_YEAR", 2017))
 START_DOY  = 1
 END_DOY    = 365
 
 CENTER   = "codg"  # other common: jplg, upcg, esag
 BASE_URL = "https://cddis.nasa.gov/archive/gnss/products/ionex"
-OUT_DIR  = "ionex_files_0917_v4"   # download folder (also read from here)
+OUT_DIR  = os.environ.get("TEC_OUT_DIR", "ionex_files_0917_v4")   # download folder (also read from here)
 
 # Output files (dynamic names keep runs clear)
 SAVE_CSV     = f"tec_{CENTER}_{START_YEAR}-{END_YEAR}_doy{START_DOY}-{END_DOY}_v2.csv"

@@ -112,12 +112,14 @@ def simple_index_plot(df_test, y_pred="rho_pred", start_index=0, n_steps=100,
 
 def add_lst_doy_features(df: pd.DataFrame,
                          time_col="time",
-                         lon_col="lon") -> pd.DataFrame:
+                         lon_col="lon",
+                         copy=True) -> pd.DataFrame:
     """
     Add Local Solar Time (LST) and Day-of-Year (DOY) features
-    with sine/cosine encoding to a dataframe.
+    with sine/cosine encoding to a dataframe. Set ``copy=False`` when the
+    caller already owns an isolated frame and needs bounded peak memory.
     """
-    d = df.copy()
+    d = df.copy() if copy else df
     d[time_col] = pd.to_datetime(d[time_col], utc=True)
 
     utc_hours = (
@@ -386,9 +388,12 @@ def plot_val_densities_with_metrics(
     Computes RMSE, Top-5% error, MAPE, R², and Pearson r in linear and log space.
     """
     cols = [time_col, obs_col, msis_col, pred_col]
-    d = df_val[cols].dropna().copy()
+    # Slice first: copying all 10M+ rows before taking every Nth sample causes
+    # a large, avoidable peak in rolling-forecast reporting.
+    d = df_val.loc[:, cols]
     if sample_step > 1:
         d = d.iloc[::sample_step]
+    d = d.dropna().copy()
 
     t    = d[time_col]
     obs  = d[obs_col].to_numpy()
@@ -714,7 +719,7 @@ def timeblock_split_repeated(
     y,
     fractions: Tuple[float, float, float] = (2/3, 1/6, 1/6),
     order: Tuple[str, str, str] = ("train", "test", "val"),
-    n_cycles: int = 5,
+    n_cycles: int = 16,
     gap_before_val: int = 0,
     gap_before_test: int = 0,
     copy: bool = False,
@@ -802,3 +807,62 @@ def timeblock_split_repeated(
     return (X_train, X_val, X_test,
             y_train, y_val, y_test,
             X.index[idx_train], X.index[idx_val], X.index[idx_test])
+
+
+def add_tec_time_lag_features(df, time_col="time", tec_col="matched_tec_value",
+                              lags=("3h",),
+                              names=("vtec_matched_lag",),
+                              tolerance="10min", group_col=None):
+    """
+    True time-based TEC lag features, robust to data gaps and to GA/GB
+    interleaving.  The defaults build the production feature: a single lag at
+    t-3h named ``vtec_matched_lag``.
+
+    For each row at time t, looks up the TEC value nearest to t - lag within
+    the same satellite track.  By default the satellite id is inferred from
+    the leading token in ``source`` (e.g. GA/GB); ``group_col`` can override
+    this.  This prevents a GA row from receiving TEC from GB at the lag time.
+    Yields NaN when no sample exists within +/- tolerance.
+    """
+    if len(lags) != len(names):
+        raise ValueError("lags and names must have the same length")
+
+    work = pd.DataFrame({
+        "_row": np.arange(len(df), dtype=np.int64),
+        "_time": pd.to_datetime(df[time_col]).dt.as_unit("ns").to_numpy(),
+        "_tec": df[tec_col].to_numpy(),
+    })
+    if group_col is not None:
+        if group_col not in df.columns:
+            raise KeyError(f"TEC lag group column not found: {group_col}")
+        work["_group"] = df[group_col].astype("string").fillna("<missing>").to_numpy()
+    elif "source" in df.columns:
+        source = df["source"].astype("string")
+        # Monthly filenames such as GA_DNS_ACC_2015_03_v02 must all map to GA,
+        # rather than becoming separate groups at month boundaries.
+        satellite = source.str.extract(r"^([A-Za-z]{2})(?:_|-)", expand=False)
+        work["_group"] = satellite.fillna(source).fillna("<missing>").to_numpy()
+    else:
+        # Backwards-compatible single-series behaviour when track identity is
+        # genuinely unavailable. Production callers should retain ``source``.
+        work["_group"] = "<all>"
+
+    for lag, name in zip(lags, names):
+        values = np.full(len(df), np.nan, dtype=float)
+        for _, track in work.groupby("_group", sort=False, dropna=False):
+            src = (track.loc[track["_tec"].notna(), ["_time", "_tec"]]
+                   .rename(columns={"_time": "_t_src", "_tec": "_tec_src"})
+                   .sort_values("_t_src", kind="mergesort"))
+            if src.empty:
+                continue
+            tgt = track[["_row", "_time"]].copy()
+            tgt["_t_lag"] = tgt["_time"] - pd.Timedelta(lag)
+            tgt = tgt.sort_values("_t_lag", kind="mergesort")
+            matched = pd.merge_asof(
+                tgt[["_row", "_t_lag"]], src,
+                left_on="_t_lag", right_on="_t_src",
+                direction="nearest", tolerance=pd.Timedelta(tolerance),
+            )
+            values[matched["_row"].to_numpy(dtype=np.int64)] = matched["_tec_src"]
+        df[name] = values
+    return df

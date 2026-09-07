@@ -23,11 +23,12 @@ import pymsis
 
 ROOT = Path(__file__).parent.parent
 
-INPUT_PARQUET  = str(ROOT / "grace_dns_2009_2016.parquet")
-OUTPUT_PARQUET = str(ROOT / "grace_dns_with_tnd_y200916_v4_0809.parquet")
+# Defaults below can be overridden via environment variables (see run_pipeline.sh)
+INPUT_PARQUET  = str(ROOT / os.environ.get("PYMSIS_INPUT", "grace_dns_2009_2016.parquet"))
+OUTPUT_PARQUET = str(ROOT / os.environ.get("PYMSIS_OUTPUT", "grace_dns_with_tnd_y200916_v4_0809.parquet"))
 
-TIME_MIN = "2009-06-06"
-TIME_MAX = "2016-01-01"
+TIME_MIN = os.environ.get("PYMSIS_TIME_MIN", "2009-06-06")
+TIME_MAX = os.environ.get("PYMSIS_TIME_MAX", "2016-01-01")
 
 AP_COLS = [
     "ap_daily",

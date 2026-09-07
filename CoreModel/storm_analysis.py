@@ -20,12 +20,13 @@ import joblib
 import xgboost as xgb
 
 import feature_functions as ff
-from config import PARQUET_FILE, MODEL_OUT, SCALER_X_OUT, SCALER_Y_OUT, FEATURES, COLS_TO_SCALE, TARGET
+from config import (PARQUET_FILE, MODEL_OUT, SCALER_X_OUT, SCALER_Y_OUT,
+                    FEATURES, COLS_TO_SCALE, TARGET, TEC_LAGS, TEC_LAG_COLS)
 
 STORM_DATE   = pd.Timestamp("2016-02-17", tz="UTC")
 PLOT_START   = pd.Timestamp("2016-02-11", tz="UTC")
 PLOT_END     = pd.Timestamp("2016-02-19", tz="UTC")
-# Load extra days so shift(17280) (~3 days) has valid values from the start of fine-tune data
+# Load extra days for the 24-hour TEC lag and the five-day fine-tuning window.
 LOAD_START   = PLOT_START - pd.Timedelta(days=5 + 4)
 
 
@@ -75,8 +76,7 @@ if __name__ == "__main__":
     df["lon_sin"]           = np.sin(np.deg2rad(df["lon"]))
     df["lon_cos"]           = np.cos(np.deg2rad(df["lon"]))
     df["lst_lat_sin"]       = df["lst_sin"] * df["lat"]
-    df["vtec_matched_lag"]  = df["matched_tec_value"].shift(500)
-    df["vtec_matched_lag2"] = df["matched_tec_value"].shift(17280)
+    df = ff.add_tec_time_lag_features(df, lags=TEC_LAGS, names=TEC_LAG_COLS)
     df[TARGET]              = np.log(df["rho_obs"] / df["msis_rho"])
     df = df.dropna(subset=FEATURES + [TARGET]).reset_index(drop=True)
 

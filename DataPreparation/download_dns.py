@@ -1,16 +1,18 @@
 # Author: Lotte Ansgaard Thomsen
 # Aalborg University
 """
-GettingData.py
-- Downloads GRACE or Swarm DNS files from the TU Delft FTP server.
+download_dns.py
+- Downloads GRACE or Swarm DNS files from the TU Delft HTTPS data service.
 - Parses the ASCII text format and stacks all years into one dataframe.
 - Saves the result as a single parquet file.
 """
 
+import os
 import re
 import zipfile
-from ftplib import FTP
 from pathlib import Path
+
+import requests
 
 import numpy as np
 import pandas as pd
@@ -21,13 +23,22 @@ from tqdm import tqdm
 # CONFIG
 # ---------------------------------------------------------------------------
 
-FTP_HOST   = "thermosphere.tudelft.nl"
-FTP_PATH   = "/version_02/Swarm_data"   # change to /version_02/GRACE_data for GRACE
+BASE_URL = "https://thermosphere.tudelft.nl/data/data/version_02"
 
-MISSION    = "Swarm"                    # "Swarm" | "GRACE"
-YEARS      = (2015, 2016)               # inclusive range
-OUTDIR     = Path("SWARM_201516_v02")
-PARQUET_OUT = "swarm_dns_2015_2016.parquet"
+MISSION_DIRS = {
+    "GRACE"    : "GRACE_data",
+    "GRACE-FO" : "GRACE-FO_data",
+    "SWARM"    : "Swarm_data",
+    "CHAMP"    : "CHAMP_data",
+    "GOCE"     : "GOCE_data",
+}
+
+# Defaults below can be overridden via environment variables (see run_pipeline.sh)
+MISSION    = os.environ.get("DNS_MISSION", "GRACE")     # key in MISSION_DIRS
+_years     = os.environ.get("DNS_YEARS", "2002,2008").split(",")
+YEARS      = (int(_years[0]), int(_years[1]))           # inclusive range
+OUTDIR     = Path(os.environ.get("DNS_OUTDIR", "GRACE_0208_v02"))
+PARQUET_OUT = os.environ.get("DNS_PARQUET_OUT", "grace_dns_2002_2008.parquet")
 
 # ---------------------------------------------------------------------------
 # READERS
@@ -120,32 +131,33 @@ def read_grace_dns_txt(
 # ---------------------------------------------------------------------------
 
 def read_dns_txt(path: Path, mission: str) -> pd.DataFrame:
-    if mission.upper() == "GRACE":
+    # File stems carry the satellite id, not the mission name:
+    # GA/GB = GRACE A/B, GC/GD = GRACE-FO C/D. Anything else -> Swarm format.
+    if mission.upper() in ("GRACE", "GA", "GB", "GC", "GD", "GRACE-FO"):
         return read_grace_dns_txt(path)
     return read_swarm_dns_txt(path)
 
 
 # ---------------------------------------------------------------------------
-# FTP DOWNLOAD
+# HTTPS DOWNLOAD
 # ---------------------------------------------------------------------------
 
 def download_dns_zips(
-    host: str,
-    ftp_path: str,
+    base_url: str,
+    mission: str,
     outdir: Path,
     years: tuple[int, int],
 ) -> list[Path]:
-    """Download DNS zip files for the requested years. Returns local paths."""
+    """Download DNS zip files for the requested years via HTTPS. Returns local paths."""
     year_pat = "|".join(str(y) for y in range(years[0], years[1] + 1))
     pattern  = re.compile(rf"_({year_pat})_\d{{2}}_v02\.zip$")
 
+    listing_url = f"{base_url}/{MISSION_DIRS[mission.upper()]}/"
     outdir.mkdir(parents=True, exist_ok=True)
 
-    ftp = FTP(host, timeout=30)
-    ftp.login("anonymous", "")
-    ftp.cwd(ftp_path)
-
-    all_files = ftp.nlst()
+    resp = requests.get(listing_url, timeout=60)
+    resp.raise_for_status()
+    all_files = sorted(set(re.findall(r'href="([^"?/]+\.zip)"', resp.text)))
     targets   = [f for f in all_files if pattern.search(f) and "DNS" in f]
     print(f"Found {len(targets)} DNS zip(s) to download.")
 
@@ -156,11 +168,13 @@ def download_dns_zips(
             print(f"  Already downloaded: {fname}")
         else:
             print(f"  Downloading: {fname}")
-            with open(local, "wb") as fh:
-                ftp.retrbinary(f"RETR {fname}", fh.write)
+            with requests.get(f"{listing_url}{fname}", stream=True, timeout=600) as r:
+                r.raise_for_status()
+                with open(local, "wb") as fh:
+                    for chunk in r.iter_content(chunk_size=1 << 20):
+                        fh.write(chunk)
         local_paths.append(local)
 
-    ftp.quit()
     return sorted(local_paths)
 
 
@@ -243,7 +257,7 @@ def plot_density(df: pd.DataFrame, title: str = "Thermospheric neutral density")
 
 if __name__ == "__main__":
     # 1. Download
-    zip_paths = download_dns_zips(FTP_HOST, FTP_PATH, OUTDIR, YEARS)
+    zip_paths = download_dns_zips(BASE_URL, MISSION, OUTDIR, YEARS)
 
     # 2. Build combined DataFrame
     df = build_dataframe(zip_paths, YEARS)

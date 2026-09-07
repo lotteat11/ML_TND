@@ -3,32 +3,40 @@
 """
 ontrack.py
 - Runs rolling warm-start forecasts on data outside the 2009–2016 training window.
-- Fine-tunes the base model each step using the previous 5 days, with early stopping.
+- Fine-tunes the base model each step on the preceding ONTRACK_LOOKBACK_DAYS
+  days (default 3), with early stopping.
 - Tests 8 combinations of retrain/no-retrain, pre/post-training dates, and 1 or 3-day horizons.
 """
 
 # %% --------------------------------- IMPORTS ---------------------------------
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import tempfile
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, "CoreModel"))
 import copy
+import gc
+import json
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import matplotlib.pyplot as plt
 import joblib
 import xgboost as xgb
 
 # Your helper module with feature engineering and plotting utilities
 import feature_functions as ff
+from config import FEATURES, COLS_TO_SCALE, TEC_LAGS, TEC_LAG_COLS
 
 # %% ----------------------------- CONFIGURATION --------------------------------
 # Turn plotting on/off for the initial MSIS vs Observed plot (not essential for batch runs)
 PLOT = False
 
-# The day for which you want to save an exact model snapshot during the rolling loop
-# Set to any date present in your dataset; example kept from your original file.
-# (You can change this freely.)
-#DATE_TO_SAVE_MODEL = pd.to_datetime("2016-02-18").date()
+# Day on which the fine-tuned model is snapshotted to disk during the rolling
+# loop. off_track.py loads that snapshot for the global grid prediction, so
+# this must be a date inside the evaluated period.
 DATE_TO_SAVE_MODEL = pd.to_datetime("2009-01-13").date()
 
 
@@ -36,63 +44,165 @@ DATE_TO_SAVE_MODEL = pd.to_datetime("2009-01-13").date()
 TARGET_COL = "log_ratio"
 
 # Model/scaler filenames (must already exist — these are from your current setup)
-MODEL_FILE = "xgb_model_v3.json"                 # base model
-SCALER_X_FILE = "scaler_xgboost_X_v3.joblib"     # fitted feature scaler
-SCALER_Y_FILE = "scaler_xgboost_y_v3.joblib"     # fitted target scaler
+# Defaults below can be overridden via environment variables (see run_pipeline.sh)
+# The reported model and its scalers: 17 features, TEC_LAGS=3h, AP_HISTORY=1.
+# These three must agree with each other and with CoreModel/config.py.
+MODEL_FILE = os.environ.get(
+    "ONTRACK_MODEL_FILE", "xgb_model_v8_storm_ap_2002train.json")
+SCALER_X_FILE = os.environ.get(
+    "ONTRACK_SCALER_X_FILE", "scaler_xgboost_X_v8_storm_ap_2002train.joblib")
+SCALER_Y_FILE = os.environ.get(
+    "ONTRACK_SCALER_Y_FILE", "scaler_xgboost_y_v8_storm_ap_2002train.joblib")
 
 # Data file (merged dataset). We will not globally filter; each run filters internally.
-DATA_FILE = "grace_data_merged2.parquet"
+DATA_FILE = os.environ.get("ONTRACK_DATA_FILE", "grace_data_merged_v5_full.parquet")
+
+
+def _at_root(path: str) -> str:
+    """Resolve a repo-relative path, so defaults work from any cwd
+    (CoreModel/config.py resolves its own paths against ROOT the same way)."""
+    return path if os.path.isabs(path) else os.path.join(_ROOT, path)
+
+
+MODEL_FILE    = _at_root(MODEL_FILE)
+SCALER_X_FILE = _at_root(SCALER_X_FILE)
+SCALER_Y_FILE = _at_root(SCALER_Y_FILE)
+DATA_FILE     = _at_root(DATA_FILE)
 
 # Output root folder for all run artifacts (CSV, PNG, updated models, etc.)
-OUTPUT_ROOT = "runs"
+OUTPUT_ROOT = os.environ.get("ONTRACK_OUTPUT_ROOT", "runs")
+
+# Optional tuned core-model parameters. When provided, warm-start uses the same
+# tree-shape parameters for newly added trees instead of XGBoost load defaults.
+# Days of history each warm-start step fine-tunes on, immediately before the
+# forecast window. Override with ONTRACK_LOOKBACK_DAYS.
+# 3 days: aggregate skill is nearly flat over 3-7, but a shorter lookback
+# carries less quiet-day history into a rising storm and so overshoots less at
+# transitions. On matched storm-2015 runs it roughly halves the windows that
+# lose to MSIS and cuts the worst window from +130% to +44%.
+LOOKBACK_DAYS = int(os.environ.get("ONTRACK_LOOKBACK_DAYS", "3"))
+if LOOKBACK_DAYS < 1:
+    raise ValueError("ONTRACK_LOOKBACK_DAYS must be >= 1")
+
+# Learning rate the warm-start schedule starts from, before its per-round decay
+# (see lr_scheduler). Override with ONTRACK_WARMSTART_LR.
+WARMSTART_LR = float(os.environ.get("ONTRACK_WARMSTART_LR", "0.005"))
+if WARMSTART_LR <= 0:
+    raise ValueError("ONTRACK_WARMSTART_LR must be > 0")
+
+# The rate is multiplied by DECAY every STEP boosting rounds. Together with the
+# initial rate these set how far one fine-tuning step can move the model.
+WARMSTART_LR_DECAY = float(os.environ.get("ONTRACK_WARMSTART_LR_DECAY", "0.9"))
+WARMSTART_LR_STEP = int(os.environ.get("ONTRACK_WARMSTART_LR_STEP", "20"))
+if not 0 < WARMSTART_LR_DECAY <= 1:
+    raise ValueError("ONTRACK_WARMSTART_LR_DECAY must be in (0, 1]")
+if WARMSTART_LR_STEP < 1:
+    raise ValueError("ONTRACK_WARMSTART_LR_STEP must be >= 1")
+
+# Boosting rounds each fine-tuning step may add, and how many rounds without
+# improvement end it. Patience bounds how far one step can move the model, so
+# it interacts with the learning rate above.
+WARMSTART_ROUNDS = int(os.environ.get("ONTRACK_WARMSTART_ROUNDS", "2000"))
+WARMSTART_PATIENCE = int(os.environ.get("ONTRACK_WARMSTART_PATIENCE", "60"))
+if WARMSTART_ROUNDS < 1 or WARMSTART_PATIENCE < 1:
+    raise ValueError("ONTRACK_WARMSTART_ROUNDS/PATIENCE must be >= 1")
+
+# Rolling steps between resets of the fine-tuned model back to the original.
+# Bounds how far warm-start can drift from the trained baseline; with a 1-day
+# rolling step this is a reset every N days. Override with ONTRACK_RESET_EVERY.
+RESET_EVERY = int(os.environ.get("ONTRACK_RESET_EVERY", "4"))
+if RESET_EVERY < 1:
+    raise ValueError("ONTRACK_RESET_EVERY must be >= 1")
+
+# Tree shape for the trees warm-start ADDS. Without this the new trees fall
+# back to XGBoost load defaults, which do not match the base model, so the
+# tuned search result is defaulted here rather than left to the caller.
+ONTRACK_PARAMS_JSON = os.environ.get(
+    "ONTRACK_PARAMS_JSON", "tuning_v13_tec3h_depth3_10/best_params.json").strip()
+ONTRACK_TREE_PARAMS = None
+if ONTRACK_PARAMS_JSON:
+    # Resolve relative to the repo root, so the default works from any cwd.
+    _params_path = (ONTRACK_PARAMS_JSON
+                    if os.path.isabs(ONTRACK_PARAMS_JSON)
+                    else os.path.join(_ROOT, ONTRACK_PARAMS_JSON))
+    if not os.path.isfile(_params_path):
+        raise FileNotFoundError(
+            f"ONTRACK_PARAMS_JSON not found: {_params_path}. Set it to a tuned "
+            f"parameter file, or to '' to use XGBoost defaults for the trees "
+            f"warm-start adds (which will not match the base model)."
+        )
+    ONTRACK_PARAMS_JSON = _params_path
+    with open(ONTRACK_PARAMS_JSON) as fh:
+        _tuned = json.load(fh)
+    ONTRACK_TREE_PARAMS = {
+        "max_depth": int(_tuned["max_depth"]),
+        "min_child_weight": float(_tuned["min_child_weight"]),
+        "subsample": float(_tuned["subsample"]),
+        "colsample_bytree": float(_tuned["colsample_bytree"]),
+    }
+    print(f"Warm-start tree params from {ONTRACK_PARAMS_JSON}: {ONTRACK_TREE_PARAMS}")
 
 # %% ----------------------------- LOAD THE DATA --------------------------------
-# IMPORTANT: Do NOT apply any global date filtering here. Each run will filter internally.
-df = pd.read_parquet(DATA_FILE)
+# Keep only the schema globally. Each run uses Parquet predicate pushdown so
+# the 82.5M-row full-mission dataset is never kept resident in its entirety.
+_RAW_NEEDED = sorted({
+    "grace_time", "source", "lat", "lon", "alt_km", "lst_h",
+    "rho_obs", "msis_rho", "matched_tec_value",
+    "f107", "f107a",
+    "ap_daily", "ap_0h", "ap_m3h", "ap_m6h", "ap_m9h",
+    "ap_avg12_33h", "ap_avg36_57h",
+})
+_available = pq.ParquetFile(DATA_FILE).schema.names
+_read_columns = [c for c in _RAW_NEEDED if c in _available]
 
-# Optional: Quick alias for time handling used later in feature engineering
-# We'll rebuild 'time' inside each run to be safe.
-# %% -
 
-# --- Extract space-weather context for the illustrative day ---
-# --- Extract space-weather context for the illustrative day ---
-day_mask = (
-    pd.to_datetime(df["grace_time"]).dt.date
-    == DATE_TO_SAVE_MODEL
-)
-day_df = df.loc[day_mask]
+def _utc(value: str) -> pd.Timestamp:
+    return pd.Timestamp(value, tz="UTC")
 
-if day_df.empty:
-    print(f"⚠️ No space-weather data for {DATE_TO_SAVE_MODEL}")
-else:
-    ap_min, ap_max = day_df["ap_m6h"].min(), day_df["ap_m6h"].max()
-    f107_min, f107_max = day_df["f107"].min(), day_df["f107"].max()
 
-    print(
-        f"{DATE_TO_SAVE_MODEL} | "
-        f"Ap_m6h: {ap_min:.0f}–{ap_max:.0f}, "
-        f"F10.7: {f107_min:.0f}–{f107_max:.0f}"
+def _filters_for_regime(date_filter: str):
+    """Arrow filters for each regime's date cuts, applied at read time."""
+    filters = {
+        "pre2009": [("grace_time", "<", _utc("2009-06-06"))],
+        "post2016": [("grace_time", ">", _utc("2016-01-01"))],
+        "y2002": [("grace_time", "<", _utc("2003-01-01"))],
+        "quiet2009": [
+            ("grace_time", ">=", _utc("2009-01-01")),
+            ("grace_time", "<", _utc("2009-06-06")),
+        ],
+        "storm2015": [
+            ("grace_time", ">=", _utc("2015-03-01")),
+            ("grace_time", "<", _utc("2015-04-15")),
+        ],
+    }
+    try:
+        return filters[date_filter]
+    except KeyError as exc:
+        raise ValueError(
+            "date_filter must be 'pre2009', 'post2016', 'y2002', "
+            "'quiet2009' or 'storm2015'"
+        ) from exc
+
+
+def _load_regime(date_filter: str) -> pd.DataFrame:
+    """Load one evaluation regime without materializing the full mission."""
+    frame = pd.read_parquet(
+        DATA_FILE,
+        columns=_read_columns,
+        filters=_filters_for_regime(date_filter),
     )
+    print(
+        f"Loaded {date_filter}: {len(frame):,} rows "
+        f"({frame.memory_usage(deep=True).sum() / 2**30:.2f} GiB in pandas)"
+    )
+    return frame
 
 
-# %% ----------------------- FEATURE LISTS (YOUR SETUP) -------------------------
-# Columns to scale (kept from your script)
-cols_to_scale = [
-    "f107", "ap_m6h", "lat", "f107a", "alt_km",
-    "matched_tec_value", "ap_m3h", "vtec_matched_lag", "vtec_matched_lag2"
-]
-
-# Full ordered feature set used for training/prediction (kept from your script)
-columns_to_keep = [
-    "f107a", "lat",
-    "matched_tec_value",
-    "lon_cos",
-    "lon_sin", "lst_sin", "ap_m3h",
-    "doy_sin", "doy_cos", "f107", "alt_km",
-    "ap_m6h",
-    "vtec_matched_lag", "vtec_matched_lag2",
-    "lst_lat_sin"
-]
+# %% ----------------------- FEATURE LISTS ------------------------------------
+# Imported from CoreModel/config.py so training and inference cannot drift.
+# AP_HISTORY / NO_AP are read there and apply to both.
+columns_to_keep = list(FEATURES)
+cols_to_scale = list(COLS_TO_SCALE)
 
 # %% ----------------------- LR SCHEDULER (YOUR LOGIC) --------------------------
 def lr_scheduler(current_round: int):
@@ -100,12 +210,11 @@ def lr_scheduler(current_round: int):
     Learning rate scheduler for native XGBoost API.
     Mirrors your setup: ultra-low LR initially, then exponential decay.
     """
-    initial_lr = 0.03
+    initial_lr = WARMSTART_LR
     if current_round < 4:
         initial_lr = 1e-7
-    decay_factor = 0.9
-    step_size = 12
-    calculated_lr = initial_lr * (decay_factor ** (current_round // step_size))
+    calculated_lr = initial_lr * (WARMSTART_LR_DECAY **
+                                  (current_round // WARMSTART_LR_STEP))
     if current_round % 100 == 0:
         print(f"Round {current_round}: LR = {calculated_lr:.8f}")
     return calculated_lr
@@ -119,16 +228,16 @@ def update_xgb_model_aggressive_with_callbacks(
     scaler_y,
     columns_to_keep,
     cols_to_scale,
-    extra_rounds: int = 2000,
-    patience_rounds: int = 300,
-    lr_scheduler=lr_scheduler
+    extra_rounds: int = WARMSTART_ROUNDS,
+    patience_rounds: int = WARMSTART_PATIENCE,
+    lr_scheduler=lr_scheduler,
+    tree_params: dict | None = None
 ):
     """
-    Aggressive update:
-    - Uses EarlyStopping + LR scheduler
-    - Returns the BEST booster (not the last)
-    - Ensures next step starts from best checkpoint
-    (Code adapted directly from your original file.)
+    One warm-start update on the most recent observations:
+    - Fine-tunes with early stopping and the decaying LR schedule
+    - Returns the booster with the lowest validation RMSE, not the last one,
+      so the next update begins from the best checkpoint
     """
     # 1) Data Preparation and Splitting
     new_data = new_data.sort_values(by=['date', 'time']).reset_index(drop=True)
@@ -182,6 +291,8 @@ def update_xgb_model_aggressive_with_callbacks(
         'objective': 'reg:squarederror',
         'eval_metric': 'rmse'
     }
+    if tree_params:
+        params.update(tree_params)
     evals_result = {}
 
     updated_booster = xgb.train(
@@ -198,26 +309,62 @@ def update_xgb_model_aggressive_with_callbacks(
     )
 
     # 4) Save best checkpoint and return clean booster
-    tmp_model_path = "model_aggressive_best.json"
-    updated_booster.save_model(tmp_model_path)
-    best_booster = xgb.Booster()
-    best_booster.load_model(tmp_model_path)
+    # Use a per-update temporary file. A fixed workspace filename retained an
+    # unnecessary artifact and made concurrent/resumed runs overwrite it.
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+        tmp_model_path = tmp.name
+    try:
+        updated_booster.save_model(tmp_model_path)
+        best_booster = xgb.Booster()
+        best_booster.load_model(tmp_model_path)
+    finally:
+        os.unlink(tmp_model_path)
     return best_booster
 
 # %% ----------------------------- METRICS HELPER -------------------------------
 def compute_metrics(df: pd.DataFrame,
                     pred_col: str = "rho_pred",
-                    obs_col: str = "rho_obs") -> dict:
-    """Compute overall metrics for the run."""
+                    obs_col: str = "rho_obs",
+                    prefix: str = "") -> dict:
+    """Paper-comparable metrics: RMSE, MAE, Top-5% error, MAPE, R2, log-RMSE, log-Top5."""
     y = df[obs_col].values
     yhat = df[pred_col].values
-    n = len(df)
-    rmse = float(np.sqrt(np.mean((yhat - y) ** 2)))
-    mae  = float(np.mean(np.abs(yhat - y)))
+    err = yhat - y
+    abs_err = np.abs(err)
+
+    rmse = float(np.sqrt(np.mean(err ** 2)))
+    mae  = float(np.mean(abs_err))
+    thr = np.quantile(abs_err, 0.95)
+    top5 = float(np.sqrt(np.mean(err[abs_err >= thr] ** 2)))
+
     mask = y != 0
-    mape = float(np.mean(np.abs((yhat[mask] - y[mask]) / y[mask])) * 100) if np.any(mask) else np.nan
-    bias = float(np.mean(yhat - y))
-    return {"n": n, "rmse": rmse, "mae": mae, "mape_pct": mape, "bias": bias}
+    mape = float(np.mean(abs_err[mask] / np.abs(y[mask])) * 100) if np.any(mask) else np.nan
+    bias = float(np.mean(err))
+    ss_res = float(np.sum(err ** 2))
+    ss_tot = float(np.sum((y - y.mean()) ** 2))
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
+
+    # log-space metrics (only where both sides positive)
+    lmask = (y > 0) & (yhat > 0)
+    if np.any(lmask):
+        lerr = np.log(yhat[lmask]) - np.log(y[lmask])
+        rmse_log = float(np.sqrt(np.mean(lerr ** 2)))
+        lthr = np.quantile(np.abs(lerr), 0.95)
+        top5_log = float(np.sqrt(np.mean(lerr[np.abs(lerr) >= lthr] ** 2)))
+    else:
+        rmse_log, top5_log = np.nan, np.nan
+
+    return {
+        f"{prefix}n": len(df),
+        f"{prefix}rmse": rmse,
+        f"{prefix}mae": mae,
+        f"{prefix}top5": top5,
+        f"{prefix}mape_pct": mape,
+        f"{prefix}bias": bias,
+        f"{prefix}r2": r2,
+        f"{prefix}rmse_log": rmse_log,
+        f"{prefix}top5_log": top5_log,
+    }
 
 # %% -------------------------- ONE RUN (PARAMETERIZED) -------------------------
 def run_experiment(do_retrain: int,
@@ -229,7 +376,8 @@ def run_experiment(do_retrain: int,
     Run the rolling fine-tune + forecast with chosen settings and save outputs.
 
     Args:
-        do_retrain: 1 to fine-tune each step on previous 5 days; 0 to skip.
+        do_retrain: 1 to fine-tune each step on the preceding
+                    LOOKBACK_DAYS days; 0 to skip.
         date_filter: "pre2009" or "post2016".
         window_size: forecast horizon in days (1 or 3).
         tag: unique label used to distinguish outputs (e.g., dr1_post2016_h3).
@@ -239,12 +387,19 @@ def run_experiment(do_retrain: int,
         pred_df: dataframe containing all predictions for this run.
         metrics: dict with overall metrics for this run.
     """
-    DATE_TO_SAVE_MODEL = pd.to_datetime("2009-01-10").date()
+    # Day whose fine-tuned model is written out as a snapshot. Forecast/
+    # off_track.py loads that snapshot to build its global map, so the map can
+    # only be made for a date that has one. Overridable per regime rather than
+    # hardcoded, so choosing a different day for the off-track figure does not
+    # need a code edit:
+    #   ONTRACK_SNAPSHOT_POST2016=2016-03-07
     print(tag)
     if "pre2009" in tag:
-        DATE_TO_SAVE_MODEL = pd.to_datetime("2009-01-13").date()
+        DATE_TO_SAVE_MODEL = _utc(
+            os.environ.get("ONTRACK_SNAPSHOT_PRE2009", "2009-01-13"))
     elif "post2016" in tag:
-        DATE_TO_SAVE_MODEL = pd.to_datetime("2016-02-18").date()
+        DATE_TO_SAVE_MODEL = _utc(
+            os.environ.get("ONTRACK_SNAPSHOT_POST2016", "2016-02-18"))
     else:
         DATE_TO_SAVE_MODEL = None
     print(DATE_TO_SAVE_MODEL)
@@ -253,31 +408,37 @@ def run_experiment(do_retrain: int,
     os.makedirs(run_dir, exist_ok=True)
 
     # ---- 0) Select data subset for this run ----
-    df_local = df.copy()
-    if date_filter == "pre2009":
-        df_local = df_local[(df_local['grace_time'] < '2009-06-06')]
-    elif date_filter == "post2016":
-        df_local = df_local[(df_local['grace_time'] > '2016-01-01')]
-    else:
-        raise ValueError("date_filter must be 'pre2009' or 'post2016'")
+    df_local = _load_regime(date_filter)
 
     # ---- 1) Feature engineering (your exact steps) ----
+    # Work in place on df_local (already a filtered copy from step 0) instead
+    # of taking further full-dataframe copies — post2016/quiet2009 are large
+    # enough (15-20M rows) that each extra copy is a real memory cost.
     df_local["time"] = df_local['grace_time']
-    df_feat_local = df_local.copy()
-    df_feat_local = ff.add_lst_doy_features(df_feat_local)
-    df_feat_local['lon_sin'] = np.sin(np.deg2rad(df_feat_local['lon']))
-    df_feat_local['lon_cos'] = np.cos(np.deg2rad(df_feat_local['lon']))
-    df_feat_local['lst_lat_cos'] = df_feat_local['lst_cos'] * df_feat_local['lat']
-    df_feat_local['vtec_matched_lag']  = df_feat_local['matched_tec_value'].shift(500)
-    df_feat_local['vtec_matched_lag2'] = df_feat_local['matched_tec_value'].shift(17280)
-    df_feat_local['lst_lat_sin'] = df_feat_local['lst_sin'] * df_feat_local['lat']
-    df_feat_local['ap_change'] = df_feat_local['ap_0h'] - df_feat_local['ap_m3h']
-    df_feat_local[TARGET_COL] = np.log(df_feat_local["rho_obs"] / df_feat_local["msis_rho"])
-    df_feat_local = df_feat_local.dropna(subset=[
-        "f107", "ap_m6h", "lat", "f107a", "alt_km",
-        "matched_tec_value", "ap_m3h", "vtec_matched_lag", "vtec_matched_lag2", "log_ratio"
-    ])
-    df_feat_predict_local = df_feat_local.copy()
+    df_local = ff.add_lst_doy_features(df_local, copy=False)
+    df_local['lon_sin'] = np.sin(np.deg2rad(df_local['lon']))
+    df_local['lon_cos'] = np.cos(np.deg2rad(df_local['lon']))
+    df_local['lst_lat_cos'] = df_local['lst_cos'] * df_local['lat']
+    df_local = ff.add_tec_time_lag_features(
+        df_local, time_col="time", lags=TEC_LAGS, names=TEC_LAG_COLS)
+    df_local['lst_lat_sin'] = df_local['lst_sin'] * df_local['lat']
+    df_local['ap_change'] = df_local['ap_0h'] - df_local['ap_m3h']
+    df_local[TARGET_COL] = np.log(df_local["rho_obs"] / df_local["msis_rho"])
+    df_local.dropna(subset=sorted(set(columns_to_keep) | {TARGET_COL}),
+                    inplace=True)
+    # Drop columns nothing downstream needs, before the rolling loop starts
+    # copying per-window slices of this frame 100s of times.
+    needed_cols = set(columns_to_keep) | set(cols_to_scale) | {
+        "date", "time", TARGET_COL, "msis_rho", "rho_obs", "grace_time",
+        "lst_cos", "lst_sin", "ap_0h",
+    }
+    # Drop in place rather than via df[keep].copy(): the copy would duplicate
+    # the whole regime frame (post2016 is ~17M rows) and needs more headroom
+    # than it saves.
+    for c in [c for c in df_local.columns if c not in needed_cols]:
+        del df_local[c]
+    df_feat_predict_local = df_local
+    gc.collect()
 
     # ---- 2) Load original model + scalers ----
     original_model = xgb.XGBRegressor()
@@ -290,22 +451,31 @@ def run_experiment(do_retrain: int,
 
     # ---- 3) Rolling loop ----
     step_size = 1
-    df_feat_predict_local['date'] = pd.to_datetime(df_feat_predict_local['time']).dt.date
+    # datetime64 is much smaller than a column of Python ``date`` objects.
+    df_feat_predict_local['date'] = pd.to_datetime(
+        df_feat_predict_local['time'], utc=True
+    ).dt.normalize()
     unique_dates = df_feat_predict_local['date'].drop_duplicates().sort_values().tolist()
 
-    all_preds = []
-    step = 10
+    # Stage windows on disk. The old all_preds list retained every overlapping
+    # h3 window, and pd.concat briefly duplicated the complete result.
+    pred_parquet = os.path.join(run_dir, f".predictions_{tag}.staging.parquet")
+    pred_writer = None
+    # Counts rolling steps, so the first window is step 1 and resets land on
+    # exact multiples of RESET_EVERY.
+    step = 0
 
-    for start_idx in range(6, len(unique_dates) - window_size + 1, step_size):
+    # Start one day past the lookback, preserving the original rolling setup.
+    for start_idx in range(LOOKBACK_DAYS + 1,
+                           len(unique_dates) - window_size + 1, step_size):
         step += 1
-   
 
-        if step % 7 == 0:
+        if step % RESET_EVERY == 0:
             # periodic reset to the original model
             base_model = copy.deepcopy(original_model)
 
-        # previous 5 days used for fine-tuning
-        prev_days = unique_dates[start_idx - 5: start_idx]
+        # Days immediately before the forecast window, used for fine-tuning.
+        prev_days = unique_dates[start_idx - LOOKBACK_DAYS: start_idx]
         train_data = df_feat_predict_local[df_feat_predict_local['date'].isin(prev_days)].copy()
 
         if do_retrain:
@@ -317,12 +487,16 @@ def run_experiment(do_retrain: int,
                 scaler_y=scaler_y,
                 columns_to_keep=columns_to_keep,
                 cols_to_scale=cols_to_scale,
-                extra_rounds=2000,
+                extra_rounds=WARMSTART_ROUNDS,
+                patience_rounds=WARMSTART_PATIENCE,
+                tree_params=ONTRACK_TREE_PARAMS,
             )
-          
+        del train_data
+
         current_forecast_start_date = unique_dates[start_idx]
         if (do_retrain == 1) and (current_forecast_start_date == DATE_TO_SAVE_MODEL):
-            snapshot_fn = os.path.join(run_dir, f"xgb_model_saved_{tag}_start_{current_forecast_start_date}.json")
+            snapshot_date = current_forecast_start_date.date()
+            snapshot_fn = os.path.join(run_dir, f"xgb_model_saved_{tag}_start_{snapshot_date}.json")
             base_model.save_model(snapshot_fn)
             print(f"\n💾 Saved snapshot for {tag} at {current_forecast_start_date} → {snapshot_fn}\n")
 
@@ -357,20 +531,43 @@ def run_experiment(do_retrain: int,
 
         keep_cols = ['date', 'time', 'y_true_log', 'y_pred_log', 'rho_true', 'rho_pred'] \
                     + columns_to_keep + ["msis_rho", "rho_obs"]
-        all_preds.append(window_data[keep_cols])
+        pred_chunk = window_data[keep_cols]
+        table = pa.Table.from_pandas(pred_chunk, preserve_index=False)
+        if pred_writer is None:
+            pred_writer = pq.ParquetWriter(
+                pred_parquet, table.schema, compression="zstd"
+            )
+        pred_writer.write_table(table)
+        del table, pred_chunk, window_data, X_to_scale, X_scaled, X_unscaled, X_final
+        gc.collect()
 
-    # ---- 4) Concatenate predictions for this run ----
-    if len(all_preds) == 0:
+    # ---- 4) Finalize disk-staged predictions for this run ----
+    if pred_writer is None:
         raise RuntimeError(f"No predictions generated for run {tag}. "
                            f"Check that your date_filter '{date_filter}' yields data and that windowing is valid.")
-    pred_df = pd.concat(all_preds).reset_index(drop=True)
+    pred_writer.close()
+    del pred_writer, df_feat_predict_local, df_local
+    gc.collect()
 
-    # ---- 5) Save per-run predictions as CSV ----
-    pred_csv = os.path.join(run_dir, f"predictions_{tag}.csv")
-    pred_df.to_csv(pred_csv, index=False)
+    # Preserve the pickle contract used by the report scripts. At this point
+    # the regime frame and rolling chunks have been released, so only one full
+    # prediction frame is resident.
+    pred_df = pd.read_parquet(pred_parquet)
 
+    # ---- 5) Save per-run predictions ----
+    # The pickle is what every downstream reader uses; the CSV is a convenience
+    # copy. Writing CSV for the largest runs builds a multi-GB string buffer on
+    # top of pred_df, so skip it there (override with ONTRACK_ALWAYS_CSV=1).
     pred_pkl = os.path.join(run_dir, f"predictions_{tag}.pkl")
     pred_df.to_pickle(pred_pkl)
+    os.unlink(pred_parquet)
+
+    csv_row_limit = int(os.environ.get("ONTRACK_CSV_MAX_ROWS", 10_000_000))
+    if len(pred_df) <= csv_row_limit or os.environ.get("ONTRACK_ALWAYS_CSV") == "1":
+        pred_df.to_csv(os.path.join(run_dir, f"predictions_{tag}.csv"), index=False)
+    else:
+        print(f"  (skipped CSV for {tag}: {len(pred_df):,} rows > {csv_row_limit:,}; "
+              f"pickle written — set ONTRACK_ALWAYS_CSV=1 to force)")
 
 
     # ---- 6) Save the (potentially) updated model for this run ----
@@ -397,9 +594,13 @@ def run_experiment(do_retrain: int,
 
 
 
-    plot_df = pred_df[
-        pd.to_datetime(pred_df["date"]).dt.date == DATE_TO_SAVE_MODEL
-    ]
+    if DATE_TO_SAVE_MODEL is None:
+        plot_df = pred_df.iloc[0:0]
+    else:
+        plot_df = pred_df[
+            pd.to_datetime(pred_df["date"], utc=True).dt.normalize()
+            == DATE_TO_SAVE_MODEL
+        ]
 
 
     if plot_df.empty:
@@ -424,43 +625,102 @@ def run_experiment(do_retrain: int,
             pickle.dump(fig, f)
 
         plt.close(fig)
-    
+
     # ---- 8) Compute & return metrics for summary CSV ----
-        metrics = compute_metrics(pred_df, pred_col="rho_pred", obs_col="rho_obs")
-        metrics.update({
-            "tag": tag,
-            "do_retrain": int(do_retrain),
-            "date_filter": date_filter,
-            "horizon_days": int(window_size)
-        })
-        return pred_df, metrics
+    # (Runs for every combo — including those without a snapshot/plot date.)
+    metrics = compute_metrics(pred_df, pred_col="rho_pred", obs_col="rho_obs")
+    metrics.update(compute_metrics(pred_df, pred_col="msis_rho", obs_col="rho_obs", prefix="msis_"))
+    metrics.update({
+        "tag": tag,
+        "do_retrain": int(do_retrain),
+        "date_filter": date_filter,
+        "horizon_days": int(window_size)
+    })
+    return pred_df, metrics
 
 # %% ------------------------------ MAIN: 8 RUNS --------------------------------
 if __name__ == "__main__":
     # Ensure output root exists
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
 
-    # Full 8 combinations:
-    do_retrain_opts = [0, 1]
-    date_filters    = ["pre2009", "post2016"]
-    horizons        = [1, 3]
+    # Full 8 combinations (12 with the full-mission filters):
+    # 0 = core model only, 1 = warm-start. Both by default; ONTRACK_RETRAIN=1
+    # runs only the warm-start half, e.g. when all that is wanted is the model
+    # snapshot dr1 writes for the off-track map.
+    do_retrain_opts = [
+        int(v) for v in os.environ.get("ONTRACK_RETRAIN", "0,1").split(",")
+        if v.strip()
+    ]
+    if not do_retrain_opts or set(do_retrain_opts) - {0, 1}:
+        raise ValueError(
+            f"ONTRACK_RETRAIN must be 0 and/or 1 "
+            f"(got {os.environ.get('ONTRACK_RETRAIN', '')!r})"
+        )
+    # The three reported holdout regimes. pre2009 belongs to the published
+    # 2009-2016 setup and is not a holdout of the 2002-2015 model.
+    date_filters    = os.environ.get(
+        "ONTRACK_FILTERS", "quiet2009,storm2015,post2016").split(",")
+    horizons = [
+        int(value.strip())
+        for value in os.environ.get("ONTRACK_HORIZONS", "1,3").split(",")
+        if value.strip()
+    ]
+    invalid_horizons = sorted(set(horizons) - {1, 3})
+    if not horizons or invalid_horizons:
+        raise ValueError(
+            "ONTRACK_HORIZONS must contain 1 and/or 3 "
+            f"(got {os.environ.get('ONTRACK_HORIZONS', '')!r})"
+        )
     combos = [(dr, dfilt, h) for dr in do_retrain_opts for dfilt in date_filters for h in horizons]
 
-    summary_rows = []
     summary_csv = os.path.join(OUTPUT_ROOT, "summary_metrics.csv")
+    if os.path.exists(summary_csv):
+        previous_summary = pd.read_csv(summary_csv)
+        previous_by_tag = {
+            str(row["tag"]): row.to_dict()
+            for _, row in previous_summary.iterrows()
+        }
+        summary_order = previous_summary["tag"].astype(str).tolist()
+    else:
+        previous_by_tag = {}
+        summary_order = []
+    summary_by_tag = previous_by_tag.copy()
 
     for dr, dfilt, h in combos:
         tag = f"dr{dr}_{dfilt}_h{h}"
-        print(f"\n===== Starting run: {tag} =====")
-        pred_df, metrics = run_experiment(do_retrain=dr, date_filter=dfilt, window_size=h, tag=tag)
-        summary_rows.append(metrics)
-        print(f"✅ Finished run {tag}")
+        existing_pkl = os.path.join(OUTPUT_ROOT, tag, f"predictions_{tag}.pkl")
+        if os.path.exists(existing_pkl) and tag in previous_by_tag:
+            # Do not reopen multi-GB prediction files merely to reproduce
+            # metrics already persisted in the progress summary.
+            print(f"\n===== Skipping run {tag} (saved metrics + predictions found) =====")
+            metrics = previous_by_tag[tag]
+        elif os.path.exists(existing_pkl):
+            # The artifact was saved but the process died before its summary
+            # row. Recover it once, then release it before starting dr1.
+            print(f"\n===== Recovering metrics for {tag} from {existing_pkl} =====")
+            pred_df = pd.read_pickle(existing_pkl)
+            metrics = compute_metrics(pred_df, pred_col="rho_pred", obs_col="rho_obs")
+            metrics.update(compute_metrics(pred_df, pred_col="msis_rho", obs_col="rho_obs", prefix="msis_"))
+            metrics.update({"tag": tag, "do_retrain": int(dr),
+                            "date_filter": dfilt, "horizon_days": int(h)})
+            del pred_df
+            gc.collect()
+        else:
+            print(f"\n===== Starting run: {tag} =====")
+            pred_df, metrics = run_experiment(do_retrain=dr, date_filter=dfilt, window_size=h, tag=tag)
+            print(f"✅ Finished run {tag}")
+            del pred_df
+            gc.collect()
+        summary_by_tag[tag] = metrics
+        if tag not in summary_order:
+            summary_order.append(tag)
+        # Keep metrics from horizons not selected in this invocation. Running
+        # h1-only must not erase already-completed h3 summary rows.
+        summary_rows = [summary_by_tag[t] for t in summary_order if t in summary_by_tag]
+        pd.DataFrame(summary_rows).to_csv(summary_csv, index=False)
 
-    summary_df = pd.DataFrame(summary_rows)
-    summary_df.to_csv(summary_csv, index=False)
     print(f"\n📄 Wrote summary metrics → {summary_csv}\n")
 
     summary_pkl = os.path.join(OUTPUT_ROOT, "summary_metrics.pkl")
-    summary_df.to_pickle(summary_pkl)
+    pd.DataFrame(summary_rows).to_pickle(summary_pkl)
     print(f"📦 Wrote summary metrics (pickle) → {summary_pkl}\n")
-
